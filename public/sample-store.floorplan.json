@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "sample-store-001",
+  "name": "Demo retail store",
+  "units": "m",
+  "widthM": 30,
+  "heightM": 20,
+  "gridSizeM": 0.5,
+  "createdAt": "2026-09-22T00:00:00.000Z",
+  "updatedAt": "2026-09-22T00:00:00.000Z",
+  "walls": [
+    { "id": "wall-1", "start": { "x": 2, "y": 2 }, "end": { "x": 28, "y": 2 }, "thicknessM": 0.15 },
+    { "id": "wall-2", "start": { "x": 28, "y": 2 }, "end": { "x": 28, "y": 18 }, "thicknessM": 0.15 },
+    { "id": "wall-3", "start": { "x": 28, "y": 18 }, "end": { "x": 2, "y": 18 }, "thicknessM": 0.15 },
+    { "id": "wall-4", "start": { "x": 2, "y": 18 }, "end": { "x": 2, "y": 2 }, "thicknessM": 0.15 }
+  ],
+  "areas": [
+    {
+      "id": "area-apparel",
+      "name": "Performance apparel",
+      "category": "apparel",
+      "points": [{ "x": 4, "y": 4 }, { "x": 14, "y": 4 }, { "x": 14, "y": 11 }, { "x": 4, "y": 11 }],
+      "walkable": true,
+      "attractiveness": 0.72,
+      "heatValue": 68
+    },
+    {
+      "id": "area-footwear",
+      "name": "Footwear",
+      "category": "footwear",
+      "points": [{ "x": 16, "y": 4 }, { "x": 26, "y": 4 }, { "x": 26, "y": 11 }, { "x": 16, "y": 11 }],
+      "walkable": true,
+      "attractiveness": 0.86,
+      "heatValue": 82
+    },
+    {
+      "id": "area-checkout",
+      "name": "Checkout",
+      "category": "checkout",
+      "points": [{ "x": 20, "y": 13 }, { "x": 26, "y": 13 }, { "x": 26, "y": 16 }, { "x": 20, "y": 16 }],
+      "walkable": true,
+      "attractiveness": 0.4,
+      "heatValue": 54
+    },
+    {
+      "id": "area-entrance",
+      "name": "Main entrance",
+      "category": "entrance",
+      "points": [{ "x": 4, "y": 13 }, { "x": 9, "y": 13 }, { "x": 9, "y": 17 }, { "x": 4, "y": 17 }],
+      "walkable": true,
+      "attractiveness": 0.2,
+      "heatValue": 36
+    }
+  ]
+}
