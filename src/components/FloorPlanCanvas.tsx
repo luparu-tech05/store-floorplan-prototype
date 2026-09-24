@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useFloorPlanStore } from '../store/useFloorPlanStore'
-import type { AreaCategory, Point } from '../types/floorplan'
+import type { AreaCategory, Point, Wall } from '../types/floorplan'
 import { distance, heatColor, polygonCentroid, polygonPoints, snapPoint } from '../utils/geometry'
 
 const categoryColors: Record<AreaCategory, string> = {
@@ -16,6 +16,85 @@ const categoryColors: Record<AreaCategory, string> = {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+
+// ============================================
+// HELPER: Agrupa los muros en "recintos" según conectividad de sus vértices
+// (vive FUERA del componente, a nivel de módulo — no dentro del JSX)
+// ============================================
+type WallCentroid = { cx: number; cy: number }
+type WallGroupResult = {
+  groups: Wall[][]
+  centroidByWallId: Record<string, WallCentroid>
+}
+
+function groupWallsByRoom(walls: Wall[], tolerance = 0.05): WallGroupResult {
+  const parent = walls.map((_, i) => i)
+
+  function find(i: number): number {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]]
+      i = parent[i]
+    }
+    return i
+  }
+
+  function union(i: number, j: number) {
+    const ri = find(i)
+    const rj = find(j)
+    if (ri !== rj) parent[ri] = rj
+  }
+
+  function samePoint(a: Point, b: Point) {
+    return Math.hypot(a.x - b.x, a.y - b.y) < tolerance
+  }
+
+  // Unimos muros que comparten un vértice (start-start, start-end, end-start, end-end)
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const w1 = walls[i]
+      const w2 = walls[j]
+      if (
+        samePoint(w1.start, w2.start) ||
+        samePoint(w1.start, w2.end) ||
+        samePoint(w1.end, w2.start) ||
+        samePoint(w1.end, w2.end)
+      ) {
+        union(i, j)
+      }
+    }
+  }
+
+  // Agrupamos por raíz del union-find
+  const groupsByRoot: Record<number, Wall[]> = {}
+  walls.forEach((wall, i) => {
+    const root = find(i)
+    if (!groupsByRoot[root]) groupsByRoot[root] = []
+    groupsByRoot[root].push(wall)
+  })
+
+  const groups = Object.values(groupsByRoot)
+
+  // Calculamos el centroide de cada grupo y lo asociamos a cada wall.id
+  const centroidByWallId: Record<string, WallCentroid> = {}
+  groups.forEach((groupWalls) => {
+    const c = groupWalls.reduce(
+      (acc, w) => {
+        acc.x += w.start.x + w.end.x
+        acc.y += w.start.y + w.end.y
+        acc.n += 2
+        return acc
+      },
+      { x: 0, y: 0, n: 0 }
+    )
+    const cx = c.x / c.n
+    const cy = c.y / c.n
+    groupWalls.forEach((w) => {
+      centroidByWallId[w.id] = { cx, cy }
+    })
+  })
+
+  return { groups, centroidByWallId }
+}
 
 export function FloorPlanCanvas() {
   const { t } = useTranslation()
@@ -220,8 +299,8 @@ export function FloorPlanCanvas() {
             <path
               d={`M ${document.gridSizeM} 0 L 0 0 0 ${document.gridSizeM}`}
               fill="none"
-              stroke="rgba(100, 116, 139, 0.22)"
-              strokeWidth="0.018"
+              stroke="rgba(100, 116, 139, 0.5)"
+              strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
           </pattern>
@@ -293,40 +372,181 @@ export function FloorPlanCanvas() {
           )
         })}
 
-        {document.walls.map((wall) => {
-          const selected = selection?.type === 'wall' && selection.id === wall.id
-          return (
-            <line
-              key={wall.id}
-              x1={wall.start.x}
-              y1={wall.start.y}
-              x2={wall.end.x}
-              y2={wall.end.y}
-              stroke={selected ? '#2563eb' : '#0f172a'}
-              strokeWidth={wall.thicknessM}
-              strokeLinecap="round"
-              className="wall-shape"
-              onPointerDown={(event) => {
-                if (tool !== 'select') return
-                event.stopPropagation()
-                setSelection({ type: 'wall', id: wall.id })
-              }}
-            />
-          )
-        })}
+        {/* 1. MUROS GUARDADOS */}
+        {(() => {
+          // Centroide por cada recinto/grupo de muros conectados
+          const { centroidByWallId } = groupWallsByRoom(document.walls)
 
-        {wallStart && pointer && (
-          <line
-            x1={wallStart.x}
-            y1={wallStart.y}
-            x2={pointer.x}
-            y2={pointer.y}
-            stroke="#2563eb"
-            strokeWidth={0.08}
-            strokeDasharray="0.18 0.12"
-            pointerEvents="none"
-          />
-        )}
+          return document.walls.map((wall) => {
+            const selected = selection?.type === 'wall' && selection.id === wall.id
+            const dx = wall.end.x - wall.start.x
+            const dy = wall.end.y - wall.start.y
+            const len = Math.hypot(dx, dy)
+
+            if (len < 0.1) return null
+
+            // Punto medio del muro
+            const midX = (wall.start.x + wall.end.x) / 2
+            const midY = (wall.start.y + wall.end.y) / 2
+
+            // Ángulo de inclinación del muro en grados
+            let angle = (Math.atan2(dy, dx) * 180) / Math.PI
+            if (angle > 90) angle -= 180
+            if (angle <= -90) angle += 180
+
+            // Vector perpendicular al muro (una de las dos direcciones posibles)
+            let nx = -dy / len
+            let ny = dx / len
+
+            // Centroide DEL GRUPO al que pertenece este muro (no global)
+            const group = centroidByWallId[wall.id]
+            const toCenterX = group.cx - midX
+            const toCenterY = group.cy - midY
+
+            // Si la normal apunta HACIA el centro del recinto (adentro), la invertimos
+            if (nx * toCenterX + ny * toCenterY > 0) {
+              nx = -nx
+              ny = -ny
+            }
+
+            // Separación respecto al centro del muro (en metros)
+            const offset = (wall.thicknessM || 0.15) / 2 + 0.35
+            const labelX = midX + nx * offset
+            const labelY = midY + ny * offset
+
+            return (
+              <g key={wall.id}>
+                {/* Línea del muro */}
+                <line
+                  x1={wall.start.x}
+                  y1={wall.start.y}
+                  x2={wall.end.x}
+                  y2={wall.end.y}
+                  stroke={selected ? '#2563eb' : '#0f172a'}
+                  strokeWidth={wall.thicknessM}
+                  strokeLinecap="round"
+                  className="wall-shape"
+                  onPointerDown={(event) => {
+                    if (tool !== 'select') return
+                    event.stopPropagation()
+                    setSelection({ type: 'wall', id: wall.id })
+                  }}
+                />
+
+                {/* Cota/Etiqueta de medida alineada al lado */}
+                <g
+                  transform={`translate(${labelX}, ${labelY}) rotate(${angle})`}
+                  pointerEvents="none"
+                >
+                  <text
+                    x="0"
+                    y="0"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize="0.28"
+                    fontWeight="700"
+                    fill={selected ? '#2563eb' : '#1e293b'}
+                  >
+                    {len.toFixed(2)} m
+                  </text>
+                </g>
+              </g>
+            )
+          })
+        })()}
+
+        {/* 2. BORRADOR MIENTRAS TRAZAS EL MURO */}
+        {wallStart && pointer && (() => {
+          const dx = pointer.x - wallStart.x
+          const dy = pointer.y - wallStart.y
+          const len = Math.hypot(dx, dy)
+
+          if (len < 0.05) return null
+
+          const midX = (wallStart.x + pointer.x) / 2
+          const midY = (wallStart.y + pointer.y) / 2
+
+          let angle = (Math.atan2(dy, dx) * 180) / Math.PI
+          if (angle > 90) angle -= 180
+          if (angle <= -90) angle += 180
+
+          let nx = -dy / len
+          let ny = dx / len
+
+          if (document.walls.length > 0) {
+            // Reutilizamos la misma agrupación por recinto que los muros guardados
+            const { groups } = groupWallsByRoom(document.walls)
+
+            // Centroide de cada grupo (recinto)
+            const groupCentroids: WallCentroid[] = groups.map((groupWalls) => {
+              const c = groupWalls.reduce(
+                (acc, w) => {
+                  acc.x += w.start.x + w.end.x
+                  acc.y += w.start.y + w.end.y
+                  acc.n += 2
+                  return acc
+                },
+                { x: 0, y: 0, n: 0 }
+              )
+              return { cx: c.x / c.n, cy: c.y / c.n }
+            })
+
+            // Buscamos el centroide de grupo más cercano al punto medio del trazo actual
+            // (forma funcional para evitar el problema de TS con 'let' reasignado dentro de un closure)
+            const closestCentroid = groupCentroids.reduce<WallCentroid | null>((closest, gc) => {
+              if (!closest) return gc
+              const distGc = Math.hypot(gc.cx - midX, gc.cy - midY)
+              const distClosest = Math.hypot(closest.cx - midX, closest.cy - midY)
+              return distGc < distClosest ? gc : closest
+            }, null)
+
+            if (closestCentroid) {
+              const toCenterX = closestCentroid.cx - midX
+              const toCenterY = closestCentroid.cy - midY
+
+              if (nx * toCenterX + ny * toCenterY > 0) {
+                nx = -nx
+                ny = -ny
+              }
+            }
+          } else {
+            // Sin muros previos, mantenemos la regla original como plan B
+            if (ny > 0 || (ny === 0 && nx < 0)) {
+              nx = -nx
+              ny = -ny
+            }
+          }
+
+          const labelX = midX + nx * 0.4
+          const labelY = midY + ny * 0.4
+
+          return (
+            <g pointerEvents="none">
+              <line
+                x1={wallStart.x}
+                y1={wallStart.y}
+                x2={pointer.x}
+                y2={pointer.y}
+                stroke="#2563eb"
+                strokeWidth={0.08}
+                strokeDasharray="0.18 0.12"
+              />
+              <g transform={`translate(${labelX}, ${labelY}) rotate(${angle})`}>
+                <text
+                  x="0"
+                  y="0"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize="0.28"
+                  fontWeight="700"
+                  fill="#2563eb"
+                >
+                  {len.toFixed(2)} m
+                </text>
+              </g>
+            </g>
+          )
+        })()}
 
         {draftAreaPoints.length > 0 && (
           <>
