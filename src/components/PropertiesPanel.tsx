@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { useFloorPlanStore } from '../store/useFloorPlanStore'
 import type { AreaCategory } from '../types/floorplan'
+import { fixtureBlueprints } from '../utils/fixtures'
+import { areaDisplayName, fixtureDisplayName } from '../utils/labels'
 
 const categories: AreaCategory[] = [
   'entrance',
@@ -20,16 +22,29 @@ export function PropertiesPanel() {
   const updatePlan = useFloorPlanStore((state) => state.updatePlan)
   const updateArea = useFloorPlanStore((state) => state.updateArea)
   const updateWall = useFloorPlanStore((state) => state.updateWall)
+  const updateFixture = useFloorPlanStore((state) => state.updateFixture)
+  const deleteSelection = useFloorPlanStore((state) => state.deleteSelection)
   const updateBackgroundOpacity = useFloorPlanStore((state) => state.updateBackgroundOpacity)
   const removeBackground = useFloorPlanStore((state) => state.removeBackground)
 
-  const selectedArea = selection?.type === 'area'
-    ? document.areas.find((area) => area.id === selection.id)
+  // El panel de detalle solo tiene sentido con UN elemento seleccionado.
+  // Con varios se muestra un resumen: editar diez cosas a la vez es otra
+  // funcionalidad (edición masiva) y no entra en este prototipo.
+  const only = selection.length === 1 ? selection[0] : undefined
+
+  const selectedArea = only?.type === 'area'
+    ? document.areas.find((area) => area.id === only.id)
     : undefined
 
-  const selectedWall = selection?.type === 'wall'
-    ? document.walls.find((wall) => wall.id === selection.id)
+  const selectedWall = only?.type === 'wall'
+    ? document.walls.find((wall) => wall.id === only.id)
     : undefined
+
+  const selectedFixture = only?.type === 'fixture'
+    ? document.fixtures.find((fixture) => fixture.id === only.id)
+    : undefined
+
+  const countOf = (type: string) => selection.filter((item) => item.type === type).length
 
   return (
     <aside className="properties-panel">
@@ -106,8 +121,27 @@ export function PropertiesPanel() {
 
       <section className="property-section selected-section">
         <h3>{t('properties.selection')}</h3>
-        {!selectedArea && !selectedWall && (
+        {!selection.length && (
           <p className="empty-properties">{t('properties.noSelection')}</p>
+        )}
+
+        {selection.length > 1 && (
+          <div className="multi-selection">
+            <div className="selection-badge">
+              {t('properties.multiCount', { count: selection.length })}
+            </div>
+            <ul className="multi-breakdown">
+              {countOf('area') > 0 && <li>{t('status.areas', { count: countOf('area') })}</li>}
+              {countOf('wall') > 0 && <li>{t('status.walls', { count: countOf('wall') })}</li>}
+              {countOf('fixture') > 0 && (
+                <li>{t('status.fixtures', { count: countOf('fixture') })}</li>
+              )}
+            </ul>
+            <button className="text-danger" onClick={deleteSelection}>
+              {t('properties.deleteSelection')}
+            </button>
+            <p className="multi-hint">{t('properties.multiHint')}</p>
+          </div>
         )}
 
         {selectedArea && (
@@ -117,8 +151,10 @@ export function PropertiesPanel() {
               <span>{t('properties.name')}</span>
               <input
                 value={selectedArea.name}
+                placeholder={areaDisplayName(selectedArea, t)}
                 onChange={(event) => updateArea(selectedArea.id, { name: event.target.value })}
               />
+              <small>{t('properties.nameHint')}</small>
             </label>
             <label>
               <span>{t('properties.category')}</span>
@@ -161,6 +197,108 @@ export function PropertiesPanel() {
                 onChange={(event) => updateArea(selectedArea.id, { heatValue: Number(event.target.value) })}
               />
               <small>{t('properties.heatHint')}</small>
+            </label>
+          </>
+        )}
+
+        {selectedFixture && (
+          <>
+            <div
+              className="selection-badge"
+              style={{
+                color: fixtureBlueprints[selectedFixture.kind].color,
+                background: `${fixtureBlueprints[selectedFixture.kind].color}1a`,
+              }}
+            >
+              {fixtureBlueprints[selectedFixture.kind].icon} {t(`fixtures.${selectedFixture.kind}`).toUpperCase()}
+            </div>
+            <label>
+              <span>{t('properties.name')}</span>
+              <input
+                value={selectedFixture.name}
+                placeholder={fixtureDisplayName(selectedFixture, t)}
+                onChange={(event) => updateFixture(selectedFixture.id, { name: event.target.value })}
+              />
+              <small>{t('properties.nameHint')}</small>
+            </label>
+            <div className="two-columns">
+              <label>
+                <span>{t('properties.fixtureWidth')}</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  value={selectedFixture.widthM}
+                  onChange={(event) =>
+                    updateFixture(selectedFixture.id, {
+                      widthM: Math.max(0.1, Number(event.target.value) || 0.1),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>{t('properties.fixtureLength')}</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  value={selectedFixture.lengthM}
+                  onChange={(event) =>
+                    updateFixture(selectedFixture.id, {
+                      lengthM: Math.max(0.1, Number(event.target.value) || 0.1),
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <label>
+              <span>{t('properties.rotation')} · {selectedFixture.rotationDeg}°</span>
+              <input
+                type="range"
+                min="0"
+                max="345"
+                step="15"
+                value={selectedFixture.rotationDeg}
+                onChange={(event) =>
+                  updateFixture(selectedFixture.id, { rotationDeg: Number(event.target.value) })
+                }
+              />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={selectedFixture.blocksMovement}
+                onChange={(event) =>
+                  updateFixture(selectedFixture.id, { blocksMovement: event.target.checked })
+                }
+              />
+              <span>{t('properties.blocksMovement')}</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={selectedFixture.blocksVision}
+                onChange={(event) =>
+                  updateFixture(selectedFixture.id, { blocksVision: event.target.checked })
+                }
+              />
+              <span>{t('properties.blocksVision')}</span>
+            </label>
+            <label>
+              <span>{t('properties.attractiveness')} · {selectedFixture.attractiveness.toFixed(2)}</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={selectedFixture.attractiveness}
+                onChange={(event) =>
+                  updateFixture(selectedFixture.id, { attractiveness: Number(event.target.value) })
+                }
+              />
+              <small>{t('properties.fixtureHint')}</small>
             </label>
           </>
         )}

@@ -4,14 +4,51 @@ import type {
   Area,
   AreaCategory,
   BackgroundPlan,
+  Fixture,
+  FixtureKind,
   FloorPlanDocument,
   Point,
   Selection,
+  SelectionRef,
   Tool,
   Wall,
 } from '../types/floorplan'
+import { createFixture } from '../utils/fixtures'
+import { nextLabelIndex } from '../utils/labels'
 
 const HISTORY_LIMIT = 60
+
+/**
+ * Los JSON guardados antes de que existieran los objetos no traen `fixtures`.
+ * Sin esto, abrirlos rompe el editor al primer `.map()`.
+ */
+const normalizeDocument = (document: FloorPlanDocument): FloorPlanDocument => {
+  const clone = structuredClone(document)
+  const counters: Record<string, number> = {}
+
+  const withLabel = <T extends { name?: string; labelIndex?: number }>(item: T, group: string) => {
+    counters[group] = (counters[group] ?? 0) + 1
+    return {
+      ...item,
+      name: item.name ?? '',
+      // Planos guardados antes de este cambio no traen labelIndex: se numeran
+      // por orden de aparición. Su `name` se respeta tal cual quedó escrito;
+      // borrarlo en el panel devuelve el nombre automático ya traducido.
+      labelIndex: item.labelIndex ?? counters[group],
+    }
+  }
+
+  return {
+    ...clone,
+    areas: (clone.areas ?? []).map((area) => withLabel(area, 'area')),
+    fixtures: (clone.fixtures ?? []).map((fixture) => ({
+      ...withLabel(fixture, fixture.kind),
+      // Los planos guardados antes del renombrado traen `depthM`.
+      lengthM:
+        fixture.lengthM ?? (fixture as unknown as { depthM?: number }).depthM ?? 0.5,
+    })),
+  }
+}
 
 export const createBlankDocument = (): FloorPlanDocument => {
   const now = new Date().toISOString()
@@ -27,12 +64,25 @@ export const createBlankDocument = (): FloorPlanDocument => {
     updatedAt: now,
     walls: [],
     areas: [],
+    fixtures: [],
   }
 }
 
 type PlanPatch = Partial<Pick<FloorPlanDocument, 'name' | 'widthM' | 'heightM' | 'gridSizeM'>>
 type AreaPatch = Partial<Pick<Area, 'name' | 'category' | 'walkable' | 'attractiveness' | 'heatValue'>>
 type WallPatch = Partial<Pick<Wall, 'thicknessM'>>
+type FixturePatch = Partial<
+  Pick<
+    Fixture,
+    | 'name'
+    | 'widthM'
+    | 'lengthM'
+    | 'rotationDeg'
+    | 'blocksMovement'
+    | 'blocksVision'
+    | 'attractiveness'
+  >
+>
 
 type FloorPlanState = {
   document: FloorPlanDocument
@@ -40,6 +90,16 @@ type FloorPlanState = {
   future: FloorPlanDocument[]
   selection: Selection
   tool: Tool
+  /** Objeto del catálogo "armado" a la espera de un clic en el lienzo. */
+  pendingFixtureKind: FixtureKind | null
+  /** El catálogo de objetos es un panel desplegable: por defecto va cerrado. */
+  catalogOpen: boolean
+  /**
+   * Objeto que se está arrastrando ahora mismo desde el catálogo.
+   * Durante dragover el navegador oculta el contenido del dataTransfer, así que
+   * esta es la única forma de saber qué dibujar como vista previa.
+   */
+  draggingFixtureKind: FixtureKind | null
   heatPreview: boolean
   zoom: number
   panX: number
@@ -51,10 +111,22 @@ type FloorPlanState = {
   addArea: (points: Point[]) => void
   updateArea: (id: string, patch: AreaPatch) => void
   updateWall: (id: string, patch: WallPatch) => void
+  addFixture: (kind: FixtureKind, position: Point) => void
+  moveFixture: (id: string, position: Point) => void
+  /** Mueve varios objetos a la vez, con UN solo registro en el historial. */
+  moveFixtures: (deltas: Array<{ id: string; position: Point }>) => void
+  updateFixture: (id: string, patch: FixturePatch) => void
+  setPendingFixtureKind: (kind: FixtureKind | null) => void
+  setDraggingFixtureKind: (kind: FixtureKind | null) => void
+  toggleCatalog: () => void
+  setCatalogOpen: (open: boolean) => void
   setBackground: (background: BackgroundPlan) => void
   updateBackgroundOpacity: (opacity: number) => void
   removeBackground: () => void
   setSelection: (selection: Selection) => void
+  /** Shift+clic: añade o quita un elemento sin perder el resto. */
+  toggleSelection: (ref: SelectionRef) => void
+  clearSelection: () => void
   deleteSelection: () => void
   setTool: (tool: Tool) => void
   setHeatPreview: (enabled: boolean) => void
@@ -86,8 +158,11 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
   document: createBlankDocument(),
   past: [],
   future: [],
-  selection: null,
+  selection: [],
   tool: 'select',
+  pendingFixtureKind: null,
+  draggingFixtureKind: null,
+  catalogOpen: false,
   heatPreview: false,
   zoom: 1,
   panX: 0,
@@ -98,8 +173,10 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       document: createBlankDocument(),
       past: [],
       future: [],
-      selection: null,
+      selection: [],
       tool: 'select',
+      pendingFixtureKind: null,
+      draggingFixtureKind: null,
       heatPreview: false,
       zoom: 1,
       panX: 0,
@@ -108,11 +185,13 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
 
   loadDocument: (document) =>
     set({
-      document: structuredClone(document),
+      document: normalizeDocument(document),
       past: [],
       future: [],
-      selection: null,
+      selection: [],
       tool: 'select',
+      pendingFixtureKind: null,
+      draggingFixtureKind: null,
       zoom: 1,
       panX: 0,
       panY: 0,
@@ -138,7 +217,8 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       const nextState = commit(state, (draft) => {
         draft.areas.push({
           id,
-          name: `Area ${draft.areas.length + 1}`,
+          name: '',
+          labelIndex: nextLabelIndex(draft.areas.map((area) => area.labelIndex)),
           category: 'other' satisfies AreaCategory,
           points,
           walkable: true,
@@ -146,7 +226,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
           heatValue: 35,
         })
       })
-      return { ...nextState, selection: { type: 'area', id }, tool: 'select' }
+      return { ...nextState, selection: [{ type: 'area', id }], tool: 'select' }
     }),
 
   updateArea: (id, patch) =>
@@ -164,6 +244,79 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
         if (wall) Object.assign(wall, patch)
       }),
     ),
+
+  addFixture: (kind, position) =>
+    set((state) => {
+      const labelIndex = nextLabelIndex(
+        state.document.fixtures
+          .filter((candidate) => candidate.kind === kind)
+          .map((candidate) => candidate.labelIndex),
+      )
+      const fixture = createFixture(kind, position, labelIndex)
+      const nextState = commit(state, (draft) => {
+        draft.fixtures.push(fixture)
+      })
+      return {
+        ...nextState,
+        selection: [{ type: 'fixture', id: fixture.id }],
+        tool: 'select',
+        pendingFixtureKind: null,
+        draggingFixtureKind: null,
+      }
+    }),
+
+  /**
+   * Se llama UNA vez, al soltar. Durante el arrastre la posición vive en el
+   * estado local del lienzo, para no llenar el historial de deshacer con un
+   * registro por cada pixel movido.
+   */
+  moveFixture: (id, position) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const fixture = draft.fixtures.find((candidate) => candidate.id === id)
+        if (fixture) fixture.position = position
+      }),
+    ),
+
+  moveFixtures: (deltas) =>
+    set((state) =>
+      commit(state, (draft) => {
+        deltas.forEach(({ id, position }) => {
+          const fixture = draft.fixtures.find((candidate) => candidate.id === id)
+          if (fixture) fixture.position = position
+        })
+      }),
+    ),
+
+  updateFixture: (id, patch) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const fixture = draft.fixtures.find((candidate) => candidate.id === id)
+        if (fixture) Object.assign(fixture, patch)
+      }),
+    ),
+
+  setPendingFixtureKind: (pendingFixtureKind) =>
+    set((state) => ({
+      pendingFixtureKind,
+      tool: pendingFixtureKind ? 'select' : state.tool,
+    })),
+
+  setDraggingFixtureKind: (draggingFixtureKind) => set({ draggingFixtureKind }),
+
+  /** Al cerrar el catálogo se desarma cualquier objeto pendiente de colocar:
+   *  si no, quedaría un clic "cargado" sin nada visible que lo explique. */
+  toggleCatalog: () =>
+    set((state) => ({
+      catalogOpen: !state.catalogOpen,
+      pendingFixtureKind: state.catalogOpen ? null : state.pendingFixtureKind,
+    })),
+
+  setCatalogOpen: (catalogOpen) =>
+    set((state) => ({
+      catalogOpen,
+      pendingFixtureKind: catalogOpen ? state.pendingFixtureKind : null,
+    })),
 
   setBackground: (background) =>
     set((state) =>
@@ -188,20 +341,48 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
 
   setSelection: (selection) => set({ selection }),
 
-  deleteSelection: () =>
+  toggleSelection: (ref) =>
     set((state) => {
-      if (!state.selection) return {}
-      const next = commit(state, (draft) => {
-        if (state.selection?.type === 'area') {
-          draft.areas = draft.areas.filter((area) => area.id !== state.selection?.id)
-        } else if (state.selection?.type === 'wall') {
-          draft.walls = draft.walls.filter((wall) => wall.id !== state.selection?.id)
-        }
-      })
-      return { ...next, selection: null }
+      const already = state.selection.some(
+        (item) => item.type === ref.type && item.id === ref.id,
+      )
+      return {
+        selection: already
+          ? state.selection.filter((item) => !(item.type === ref.type && item.id === ref.id))
+          : [...state.selection, ref],
+      }
     }),
 
-  setTool: (tool) => set((state) => ({ tool, selection: tool === 'select' ? state.selection : null })),
+  clearSelection: () => set({ selection: [] }),
+
+  deleteSelection: () =>
+    set((state) => {
+      if (!state.selection.length) return {}
+
+      const idsOf = (type: SelectionRef['type']) =>
+        new Set(state.selection.filter((item) => item.type === type).map((item) => item.id))
+
+      const areaIds = idsOf('area')
+      const wallIds = idsOf('wall')
+      const fixtureIds = idsOf('fixture')
+
+      // Todo lo seleccionado se borra en UNA sola operación: un Ctrl+Z lo devuelve.
+      const next = commit(state, (draft) => {
+        if (areaIds.size) draft.areas = draft.areas.filter((area) => !areaIds.has(area.id))
+        if (wallIds.size) draft.walls = draft.walls.filter((wall) => !wallIds.has(wall.id))
+        if (fixtureIds.size) {
+          draft.fixtures = draft.fixtures.filter((fixture) => !fixtureIds.has(fixture.id))
+        }
+      })
+      return { ...next, selection: [] }
+    }),
+
+  setTool: (tool) =>
+    set((state) => ({
+      tool,
+      selection: tool === 'select' ? state.selection : [],
+      pendingFixtureKind: null,
+    })),
   setHeatPreview: (heatPreview) => set({ heatPreview }),
   setViewport: (viewport) => set(viewport),
   resetViewport: () => set({ zoom: 1, panX: 0, panY: 0 }),
@@ -214,7 +395,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
         document: previous,
         past: state.past.slice(0, -1),
         future: [state.document, ...state.future].slice(0, HISTORY_LIMIT),
-        selection: null,
+        selection: [],
       }
     }),
 
@@ -226,7 +407,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
         document: next,
         past: [...state.past, state.document].slice(-HISTORY_LIMIT),
         future: state.future.slice(1),
-        selection: null,
+        selection: [],
       }
     }),
 }))

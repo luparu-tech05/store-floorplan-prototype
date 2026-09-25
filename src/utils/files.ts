@@ -24,7 +24,9 @@ export const readJsonFile = async (file: File): Promise<FloorPlanDocument> => {
     throw new Error('INVALID_PROJECT')
   }
 
-  return value as FloorPlanDocument
+  // Los proyectos exportados antes de que existieran los objetos no traen
+  // `fixtures`; se rellena aquí para que sigan abriéndose sin romper nada.
+  return { ...value, fixtures: value.fixtures ?? [] } as FloorPlanDocument
 }
 
 export const fileToDataUrl = (file: File): Promise<string> =>

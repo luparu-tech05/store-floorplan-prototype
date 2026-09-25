@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FloorPlanCanvas } from './components/FloorPlanCanvas'
+import { ObjectCatalog } from './components/ObjectCatalog'
 import { PropertiesPanel } from './components/PropertiesPanel'
 import { StartScreen } from './components/StartScreen'
 import { StatusBar } from './components/StatusBar'
@@ -22,6 +23,7 @@ export default function App() {
   const newDocument = useFloorPlanStore((state) => state.newDocument)
   const loadDocument = useFloorPlanStore((state) => state.loadDocument)
   const setBackground = useFloorPlanStore((state) => state.setBackground)
+  const catalogOpen = useFloorPlanStore((state) => state.catalogOpen)
   const projectInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundStartsFreshRef = useRef(false)
@@ -134,8 +136,9 @@ export default function App() {
             onBackground={() => triggerBackground(false)}
             onExport={() => downloadJson(document)}
           />
-          <div className="editor-grid">
+          <div className={`editor-grid${catalogOpen ? ' with-catalog' : ''}`}>
             <ToolPalette />
+            {catalogOpen && <ObjectCatalog />}
             <FloorPlanCanvas />
             <PropertiesPanel />
           </div>
