@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "sample-store-001",
   "name": "Demo retail store",
   "units": "m",
@@ -7,17 +7,18 @@
   "heightM": 20,
   "gridSizeM": 0.5,
   "createdAt": "2026-09-22T00:00:00.000Z",
-  "updatedAt": "2026-09-22T00:00:00.000Z",
+  "updatedAt": "2026-10-06T00:00:00.000Z",
   "walls": [
-    { "id": "wall-1", "start": { "x": 2, "y": 2 }, "end": { "x": 28, "y": 2 }, "thicknessM": 0.15 },
-    { "id": "wall-2", "start": { "x": 28, "y": 2 }, "end": { "x": 28, "y": 18 }, "thicknessM": 0.15 },
-    { "id": "wall-3", "start": { "x": 28, "y": 18 }, "end": { "x": 2, "y": 18 }, "thicknessM": 0.15 },
-    { "id": "wall-4", "start": { "x": 2, "y": 18 }, "end": { "x": 2, "y": 2 }, "thicknessM": 0.15 }
+    { "id": "wall-1", "start": { "x": 2, "y": 2 }, "end": { "x": 28, "y": 2 }, "thicknessM": 0.15, "heightM": 3 },
+    { "id": "wall-2", "start": { "x": 28, "y": 2 }, "end": { "x": 28, "y": 18 }, "thicknessM": 0.15, "heightM": 3 },
+    { "id": "wall-3", "start": { "x": 28, "y": 18 }, "end": { "x": 2, "y": 18 }, "thicknessM": 0.15, "heightM": 3 },
+    { "id": "wall-4", "start": { "x": 2, "y": 18 }, "end": { "x": 2, "y": 2 }, "thicknessM": 0.15, "heightM": 3 }
   ],
   "areas": [
     {
       "id": "area-apparel",
       "name": "Performance apparel",
+      "labelIndex": 1,
       "category": "apparel",
       "points": [{ "x": 4, "y": 4 }, { "x": 14, "y": 4 }, { "x": 14, "y": 11 }, { "x": 4, "y": 11 }],
       "walkable": true,
@@ -27,6 +28,7 @@
     {
       "id": "area-footwear",
       "name": "Footwear",
+      "labelIndex": 2,
       "category": "footwear",
       "points": [{ "x": 16, "y": 4 }, { "x": 26, "y": 4 }, { "x": 26, "y": 11 }, { "x": 16, "y": 11 }],
       "walkable": true,
@@ -36,6 +38,7 @@
     {
       "id": "area-checkout",
       "name": "Checkout",
+      "labelIndex": 3,
       "category": "checkout",
       "points": [{ "x": 20, "y": 13 }, { "x": 26, "y": 13 }, { "x": 26, "y": 16 }, { "x": 20, "y": 16 }],
       "walkable": true,
@@ -45,11 +48,70 @@
     {
       "id": "area-entrance",
       "name": "Main entrance",
+      "labelIndex": 4,
       "category": "entrance",
       "points": [{ "x": 4, "y": 13 }, { "x": 9, "y": 13 }, { "x": 9, "y": 17 }, { "x": 4, "y": 17 }],
       "walkable": true,
       "attractiveness": 0.2,
       "heatValue": 36
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "fixture-shelf-1",
+      "kind": "shelf",
+      "name": "",
+      "labelIndex": 1,
+      "position": { "x": 9, "y": 7 },
+      "widthM": 3.2,
+      "lengthM": 0.65,
+      "heightM": 1.8,
+      "rotationDeg": 0,
+      "blocksMovement": true,
+      "blocksVision": false,
+      "attractiveness": 0.6
+    },
+    {
+      "id": "fixture-rack-1",
+      "kind": "rack",
+      "name": "",
+      "labelIndex": 1,
+      "position": { "x": 20.5, "y": 7.5 },
+      "widthM": 2.2,
+      "lengthM": 0.7,
+      "heightM": 1.45,
+      "rotationDeg": 90,
+      "blocksMovement": true,
+      "blocksVision": false,
+      "attractiveness": 0.65
+    },
+    {
+      "id": "fixture-counter-1",
+      "kind": "counter",
+      "name": "",
+      "labelIndex": 1,
+      "position": { "x": 23, "y": 14.5 },
+      "widthM": 3.4,
+      "lengthM": 0.8,
+      "heightM": 1.05,
+      "rotationDeg": 0,
+      "blocksMovement": true,
+      "blocksVision": true,
+      "attractiveness": 0.9
+    },
+    {
+      "id": "fixture-mannequin-1",
+      "kind": "mannequin",
+      "name": "",
+      "labelIndex": 1,
+      "position": { "x": 12.5, "y": 14.5 },
+      "widthM": 0.55,
+      "lengthM": 0.55,
+      "heightM": 1.75,
+      "rotationDeg": 0,
+      "blocksMovement": true,
+      "blocksVision": false,
+      "attractiveness": 0.85
     }
   ]
 }

@@ -4,6 +4,7 @@ export type Point = {
 }
 
 export type Tool = 'select' | 'pan' | 'wall' | 'area'
+export type ViewMode = '2d' | '3d'
 
 export type AreaCategory =
   | 'entrance'
@@ -20,6 +21,8 @@ export type Wall = {
   start: Point
   end: Point
   thicknessM: number
+  /** Altura usada por la visualización 3D. */
+  heightM: number
 }
 
 export type Area = {
@@ -53,9 +56,7 @@ export type Fixture = {
   kind: FixtureKind
   /**
    * Nombre escrito por el usuario. Vacío = se muestra el nombre automático,
-   * que se traduce al dibujar. El documento NUNCA guarda texto traducido:
-   * si lo guardara, un plano hecho en inglés seguiría en inglés al cambiar
-   * la interfaz a español.
+   * que se traduce al dibujar. El documento NUNCA guarda texto traducido.
    */
   name: string
   /** Número correlativo del nombre automático ("Maniquí 2"), sin idioma. */
@@ -63,17 +64,15 @@ export type Fixture = {
   position: Point
   /** Medida horizontal del objeto sin rotar, en metros. */
   widthM: number
-  /**
-   * Medida vertical del objeto sin rotar, en metros.
-   * En un plano visto desde arriba las dos dimensiones son ancho y largo:
-   * "fondo" o "alto" serían vocabulario de mueble en 3D, no de planta.
-   */
+  /** Medida longitudinal del objeto en planta, en metros. */
   lengthM: number
+  /** Altura física aproximada para la visualización 3D. */
+  heightM: number
   /** Giro en grados. Al rotar 90° el ancho pasa a verse en vertical. */
   rotationDeg: number
-  /** Bloquea el paso del agente. Un expositor bajo puede no bloquearlo. */
+  /** Bloquea el paso del agente. */
   blocksMovement: boolean
-  /** Bloquea la línea de visión. Un mostrador alto sí, una mesa no. */
+  /** Bloquea la línea de visión. */
   blocksVision: boolean
   /** 0..1 — cuánto atrae al agente como destino. */
   attractiveness: number
@@ -88,7 +87,11 @@ export type BackgroundPlan = {
 }
 
 export type FloorPlanDocument = {
-  schemaVersion: 1
+  /**
+   * v2 añade alturas para muros/objetos. El cargador sigue aceptando v1 y
+   * completa esas alturas automáticamente para mantener compatibilidad.
+   */
+  schemaVersion: 2
   id: string
   name: string
   units: 'm'

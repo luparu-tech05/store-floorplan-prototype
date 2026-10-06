@@ -13,7 +13,7 @@ import type {
   Tool,
   Wall,
 } from '../types/floorplan'
-import { createFixture } from '../utils/fixtures'
+import { createFixture, fixtureBlueprints } from '../utils/fixtures'
 import { nextLabelIndex } from '../utils/labels'
 
 const HISTORY_LIMIT = 60
@@ -40,12 +40,18 @@ const normalizeDocument = (document: FloorPlanDocument): FloorPlanDocument => {
 
   return {
     ...clone,
+    schemaVersion: 2,
+    walls: (clone.walls ?? []).map((wall) => ({
+      ...wall,
+      heightM: wall.heightM ?? 3,
+    })),
     areas: (clone.areas ?? []).map((area) => withLabel(area, 'area')),
     fixtures: (clone.fixtures ?? []).map((fixture) => ({
       ...withLabel(fixture, fixture.kind),
       // Los planos guardados antes del renombrado traen `depthM`.
       lengthM:
         fixture.lengthM ?? (fixture as unknown as { depthM?: number }).depthM ?? 0.5,
+      heightM: fixture.heightM ?? fixtureBlueprints[fixture.kind]?.heightM ?? 1,
     })),
   }
 }
@@ -53,7 +59,7 @@ const normalizeDocument = (document: FloorPlanDocument): FloorPlanDocument => {
 export const createBlankDocument = (): FloorPlanDocument => {
   const now = new Date().toISOString()
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: crypto.randomUUID(),
     name: 'Store layout',
     units: 'm',
@@ -70,13 +76,14 @@ export const createBlankDocument = (): FloorPlanDocument => {
 
 type PlanPatch = Partial<Pick<FloorPlanDocument, 'name' | 'widthM' | 'heightM' | 'gridSizeM'>>
 type AreaPatch = Partial<Pick<Area, 'name' | 'category' | 'walkable' | 'attractiveness' | 'heatValue'>>
-type WallPatch = Partial<Pick<Wall, 'thicknessM'>>
+type WallPatch = Partial<Pick<Wall, 'thicknessM' | 'heightM'>>
 type FixturePatch = Partial<
   Pick<
     Fixture,
     | 'name'
     | 'widthM'
     | 'lengthM'
+    | 'heightM'
     | 'rotationDeg'
     | 'blocksMovement'
     | 'blocksVision'
@@ -207,6 +214,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
           start,
           end,
           thicknessM: 0.15,
+          heightM: 3,
         })
       }),
     ),

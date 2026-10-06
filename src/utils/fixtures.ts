@@ -2,8 +2,7 @@ import type { Fixture, FixtureKind, Point } from '../types/floorplan'
 
 /**
  * Plantilla de cada tipo de objeto: medidas por defecto en metros, color y
- * semántica para la simulación. Añadir un objeto nuevo = añadir una entrada aquí
- * (y su texto en i18n). Nada más hay que tocar.
+ * semántica para la simulación/visualización 3D.
  */
 export type FixtureBlueprint = {
   kind: FixtureKind
@@ -11,6 +10,7 @@ export type FixtureBlueprint = {
   color: string
   widthM: number
   lengthM: number
+  heightM: number
   blocksMovement: boolean
   blocksVision: boolean
   attractiveness: number
@@ -18,74 +18,39 @@ export type FixtureBlueprint = {
 
 export const fixtureBlueprints: Record<FixtureKind, FixtureBlueprint> = {
   shelf: {
-    kind: 'shelf',
-    icon: '▤',
-    color: '#6366f1',
-    widthM: 1.2,
-    lengthM: 0.5,
-    blocksMovement: true,
-    blocksVision: false,
-    attractiveness: 0.6,
+    kind: 'shelf', icon: '▤', color: '#6366f1',
+    widthM: 1.2, lengthM: 0.5, heightM: 1.8,
+    blocksMovement: true, blocksVision: false, attractiveness: 0.6,
   },
   rack: {
-    kind: 'rack',
-    icon: '☰',
-    color: '#0ea5e9',
-    widthM: 1.4,
-    lengthM: 0.6,
-    blocksMovement: true,
-    blocksVision: false,
-    attractiveness: 0.65,
+    kind: 'rack', icon: '☰', color: '#0ea5e9',
+    widthM: 1.4, lengthM: 0.6, heightM: 1.45,
+    blocksMovement: true, blocksVision: false, attractiveness: 0.65,
   },
   mannequin: {
-    kind: 'mannequin',
-    icon: '♟',
-    color: '#a855f7',
-    widthM: 0.5,
-    lengthM: 0.5,
-    blocksMovement: true,
-    blocksVision: false,
-    attractiveness: 0.85,
+    kind: 'mannequin', icon: '♟', color: '#a855f7',
+    widthM: 0.5, lengthM: 0.5, heightM: 1.75,
+    blocksMovement: true, blocksVision: false, attractiveness: 0.85,
   },
   table: {
-    kind: 'table',
-    icon: '▭',
-    color: '#14b8a6',
-    widthM: 1.2,
-    lengthM: 0.8,
-    blocksMovement: true,
-    blocksVision: false,
-    attractiveness: 0.55,
+    kind: 'table', icon: '▭', color: '#14b8a6',
+    widthM: 1.2, lengthM: 0.8, heightM: 0.82,
+    blocksMovement: true, blocksVision: false, attractiveness: 0.55,
   },
   counter: {
-    kind: 'counter',
-    icon: '▥',
-    color: '#f59e0b',
-    widthM: 2,
-    lengthM: 0.7,
-    blocksMovement: true,
-    blocksVision: true,
-    attractiveness: 0.9,
+    kind: 'counter', icon: '▥', color: '#f59e0b',
+    widthM: 2, lengthM: 0.7, heightM: 1.05,
+    blocksMovement: true, blocksVision: true, attractiveness: 0.9,
   },
   fittingBooth: {
-    kind: 'fittingBooth',
-    icon: '◫',
-    color: '#ec4899',
-    widthM: 1.2,
-    lengthM: 1.2,
-    blocksMovement: true,
-    blocksVision: true,
-    attractiveness: 0.75,
+    kind: 'fittingBooth', icon: '◫', color: '#ec4899',
+    widthM: 1.2, lengthM: 1.2, heightM: 2.25,
+    blocksMovement: true, blocksVision: true, attractiveness: 0.75,
   },
 }
 
 export const fixtureKinds: FixtureKind[] = [
-  'shelf',
-  'rack',
-  'mannequin',
-  'table',
-  'counter',
-  'fittingBooth',
+  'shelf', 'rack', 'mannequin', 'table', 'counter', 'fittingBooth',
 ]
 
 /** Tipo MIME propio para el arrastre HTML5: evita aceptar cualquier texto soltado. */
@@ -103,12 +68,12 @@ export const createFixture = (
   return {
     id: crypto.randomUUID(),
     kind,
-    // Sin nombre propio: la etiqueta se compone y se traduce al dibujar.
     name: '',
     labelIndex,
     position,
     widthM: blueprint.widthM,
     lengthM: blueprint.lengthM,
+    heightM: blueprint.heightM,
     rotationDeg: 0,
     blocksMovement: blueprint.blocksMovement,
     blocksVision: blueprint.blocksVision,
@@ -116,11 +81,7 @@ export const createFixture = (
   }
 }
 
-/**
- * Las cuatro esquinas del objeto ya rotadas, en metros.
- * Todavía no se usa en el editor: es lo que necesitará el motor de simulación
- * para marcar celdas ocupadas en la rejilla de navegación.
- */
+/** Las cuatro esquinas del objeto ya rotadas, en metros. */
 export const fixtureCorners = (fixture: Fixture): Point[] => {
   const radians = (fixture.rotationDeg * Math.PI) / 180
   const cos = Math.cos(radians)

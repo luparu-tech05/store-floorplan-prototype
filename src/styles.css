@@ -370,3 +370,144 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   .catalog-list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .statusbar { min-height: 30px; }
 }
+
+/* ============================================================
+   Vista 3D — derivada del mismo documento semántico del editor 2D
+   ============================================================ */
+.view-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  background: #111827;
+}
+.view-switch button {
+  min-width: 40px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: #94a3b8;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 900;
+}
+.view-switch button:hover { color: #e2e8f0; }
+.view-switch button.active { color: #fff; background: #2563eb; }
+
+.editor-grid.view-3d {
+  grid-template-columns: minmax(0, 1fr) 318px;
+}
+
+.viewer3d-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #e7edf5;
+}
+.viewer3d-canvas {
+  position: absolute;
+  inset: 0;
+}
+.viewer3d-renderer {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+.viewer3d-meta {
+  position: absolute;
+  z-index: 5;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  pointer-events: none;
+}
+.viewer3d-meta span,
+.viewer3d-reset,
+.viewer3d-hint {
+  border: 1px solid rgba(148, 163, 184, .30);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .90);
+  box-shadow: 0 5px 18px rgba(15, 23, 42, .08);
+  backdrop-filter: blur(9px);
+}
+.viewer3d-meta span {
+  padding: 7px 10px;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+}
+.viewer3d-meta .viewer3d-badge {
+  color: #fff;
+  border-color: #2563eb;
+  background: #2563eb;
+  letter-spacing: .08em;
+}
+.viewer3d-reset {
+  position: absolute;
+  z-index: 6;
+  top: 14px;
+  right: 14px;
+  padding: 8px 11px;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 900;
+}
+.viewer3d-reset:hover { color: #1d4ed8; background: #eff6ff; }
+.viewer3d-hint {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 15px;
+  transform: translateX(-50%);
+  width: min(680px, 78%);
+  padding: 9px 12px;
+  text-align: center;
+  pointer-events: none;
+}
+.viewer3d-hint strong,
+.viewer3d-hint span { display: block; }
+.viewer3d-hint strong { color: #334155; font-size: 10px; }
+.viewer3d-hint span { margin-top: 3px; color: #64748b; font-size: 9px; }
+.viewer3d-empty {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 6px;
+  width: min(420px, 72%);
+  padding: 18px 20px;
+  text-align: center;
+  pointer-events: none;
+  border: 1px dashed #94a3b8;
+  border-radius: 13px;
+  background: rgba(248, 250, 252, .78);
+}
+.viewer3d-empty strong { color: #475569; font-size: 13px; }
+.viewer3d-empty span { color: #94a3b8; font-size: 10px; }
+
+@media (max-width: 1180px) {
+  .topbar { grid-template-columns: minmax(190px, 1fr) auto minmax(300px, 1fr); gap: 10px; }
+  .topbar-right { gap: 7px; }
+}
+
+@media (max-width: 1050px) {
+  .view-switch { justify-self: end; }
+}
+
+@media (max-width: 760px) {
+  .editor-grid.view-3d {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(520px, 68vh) auto;
+  }
+  .editor-grid.view-3d .viewer3d-shell { grid-row: 1; grid-column: 1; }
+  .editor-grid.view-3d .properties-panel { grid-row: 2; grid-column: 1; }
+  .viewer3d-meta span:not(.viewer3d-badge) { display: none; }
+  .viewer3d-hint { width: 88%; }
+}

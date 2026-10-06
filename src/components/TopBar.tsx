@@ -1,7 +1,10 @@
 import { useTranslation } from 'react-i18next'
 import { useFloorPlanStore } from '../store/useFloorPlanStore'
+import type { ViewMode } from '../types/floorplan'
 
 type Props = {
+  viewMode: ViewMode
+  onViewModeChange: (mode: ViewMode) => void
   onHome: () => void
   onNew: () => void
   onImport: () => void
@@ -9,7 +12,15 @@ type Props = {
   onExport: () => void
 }
 
-export function TopBar({ onHome, onNew, onImport, onBackground, onExport }: Props) {
+export function TopBar({
+  viewMode,
+  onViewModeChange,
+  onHome,
+  onNew,
+  onImport,
+  onBackground,
+  onExport,
+}: Props) {
   const { t, i18n } = useTranslation()
   const document = useFloorPlanStore((state) => state.document)
   const heatPreview = useFloorPlanStore((state) => state.heatPreview)
@@ -26,7 +37,7 @@ export function TopBar({ onHome, onNew, onImport, onBackground, onExport }: Prop
         <span className="brand-mark">SF</span>
         <span>
           <strong>{document.name}</strong>
-          <small>Floorplan prototype · v0.1</small>
+          <small>Floorplan prototype · v0.2 · 2D/3D</small>
         </span>
       </div>
 
@@ -38,6 +49,23 @@ export function TopBar({ onHome, onNew, onImport, onBackground, onExport }: Prop
       </nav>
 
       <div className="topbar-right">
+        <div className="view-switch" aria-label={t('topbar.viewMode')}>
+          <button
+            className={viewMode === '2d' ? 'active' : ''}
+            onClick={() => onViewModeChange('2d')}
+            aria-pressed={viewMode === '2d'}
+          >
+            {t('topbar.view2d')}
+          </button>
+          <button
+            className={viewMode === '3d' ? 'active' : ''}
+            onClick={() => onViewModeChange('3d')}
+            aria-pressed={viewMode === '3d'}
+          >
+            {t('topbar.view3d')}
+          </button>
+        </div>
+
         <label className="heat-toggle">
           <input
             type="checkbox"

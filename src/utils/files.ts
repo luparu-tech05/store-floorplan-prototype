@@ -12,10 +12,13 @@ export const downloadJson = (document: FloorPlanDocument) => {
 
 export const readJsonFile = async (file: File): Promise<FloorPlanDocument> => {
   const text = await file.text()
-  const value = JSON.parse(text) as Partial<FloorPlanDocument>
+  type ImportedDocument = Omit<Partial<FloorPlanDocument>, 'schemaVersion'> & { schemaVersion?: number }
+  const value = JSON.parse(text) as ImportedDocument
 
+  // v1 = editor 2D original. v2 = alturas necesarias para la vista 3D.
+  // La normalización final vive en el store, donde se completan los defaults.
   if (
-    value.schemaVersion !== 1 ||
+    (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
     !Array.isArray(value.walls) ||
     !Array.isArray(value.areas) ||
     typeof value.widthM !== 'number' ||
@@ -24,8 +27,6 @@ export const readJsonFile = async (file: File): Promise<FloorPlanDocument> => {
     throw new Error('INVALID_PROJECT')
   }
 
-  // Los proyectos exportados antes de que existieran los objetos no traen
-  // `fixtures`; se rellena aquí para que sigan abriéndose sin romper nada.
   return { ...value, fixtures: value.fixtures ?? [] } as FloorPlanDocument
 }
 

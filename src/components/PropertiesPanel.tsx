@@ -254,6 +254,21 @@ export function PropertiesPanel() {
               </label>
             </div>
             <label>
+              <span>{t('properties.fixtureHeight')}</span>
+              <input
+                type="number"
+                min="0.05"
+                max="8"
+                step="0.05"
+                value={selectedFixture.heightM}
+                onChange={(event) =>
+                  updateFixture(selectedFixture.id, {
+                    heightM: Math.max(0.05, Number(event.target.value) || 0.05),
+                  })
+                }
+              />
+            </label>
+            <label>
               <span>{t('properties.rotation')} · {selectedFixture.rotationDeg}°</span>
               <input
                 type="range"
@@ -315,6 +330,19 @@ export function PropertiesPanel() {
                 step="0.05"
                 value={selectedWall.thicknessM}
                 onChange={(event) => updateWall(selectedWall.id, { thicknessM: Number(event.target.value) || 0.15 })}
+              />
+            </label>
+            <label>
+              <span>{t('properties.wallHeight')}</span>
+              <input
+                type="number"
+                min="0.2"
+                max="12"
+                step="0.1"
+                value={selectedWall.heightM}
+                onChange={(event) =>
+                  updateWall(selectedWall.id, { heightM: Math.max(0.2, Number(event.target.value) || 3) })
+                }
               />
             </label>
           </>

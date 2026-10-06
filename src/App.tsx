@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { FloorPlan3D } from './components/FloorPlan3D'
 import { FloorPlanCanvas } from './components/FloorPlanCanvas'
 import { ObjectCatalog } from './components/ObjectCatalog'
 import { PropertiesPanel } from './components/PropertiesPanel'
@@ -8,7 +9,7 @@ import { StatusBar } from './components/StatusBar'
 import { ToolPalette } from './components/ToolPalette'
 import { TopBar } from './components/TopBar'
 import { useFloorPlanStore } from './store/useFloorPlanStore'
-import type { BackgroundPlan, FloorPlanDocument } from './types/floorplan'
+import type { BackgroundPlan, FloorPlanDocument, ViewMode } from './types/floorplan'
 import { downloadJson, fileToDataUrl, readJsonFile } from './utils/files'
 
 const DRAFT_KEY = 'store-floorplan-prototype:draft:v1'
@@ -18,12 +19,14 @@ type Screen = 'start' | 'editor'
 export default function App() {
   const { t } = useTranslation()
   const [screen, setScreen] = useState<Screen>('start')
+  const [viewMode, setViewMode] = useState<ViewMode>('2d')
   const [hasDraft, setHasDraft] = useState(() => Boolean(localStorage.getItem(DRAFT_KEY)))
   const document = useFloorPlanStore((state) => state.document)
   const newDocument = useFloorPlanStore((state) => state.newDocument)
   const loadDocument = useFloorPlanStore((state) => state.loadDocument)
   const setBackground = useFloorPlanStore((state) => state.setBackground)
   const catalogOpen = useFloorPlanStore((state) => state.catalogOpen)
+  const setCatalogOpen = useFloorPlanStore((state) => state.setCatalogOpen)
   const projectInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundStartsFreshRef = useRef(false)
@@ -36,12 +39,14 @@ export default function App() {
 
   const openNew = () => {
     newDocument()
+    setViewMode('2d')
     setScreen('editor')
   }
 
   const confirmNew = () => {
     if (!window.confirm(t('dialogs.newConfirm'))) return
     newDocument()
+    setViewMode('2d')
   }
 
   const triggerOpenProject = () => projectInputRef.current?.click()
@@ -56,6 +61,7 @@ export default function App() {
     try {
       const loaded = await readJsonFile(file)
       loadDocument(loaded)
+      setViewMode('2d')
       setScreen('editor')
     } catch {
       window.alert(t('errors.invalidProject'))
@@ -84,6 +90,7 @@ export default function App() {
       opacity: 0.55,
     }
     setBackground(background)
+    setViewMode('2d')
     setScreen('editor')
     backgroundStartsFreshRef.current = false
     if (backgroundInputRef.current) backgroundInputRef.current.value = ''
@@ -95,11 +102,17 @@ export default function App() {
     try {
       const parsed = JSON.parse(stored) as FloorPlanDocument
       loadDocument(parsed)
+      setViewMode('2d')
       setScreen('editor')
     } catch {
       localStorage.removeItem(DRAFT_KEY)
       setHasDraft(false)
     }
+  }
+
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode)
+    if (mode === '3d') setCatalogOpen(false)
   }
 
   return (
@@ -130,19 +143,30 @@ export default function App() {
       ) : (
         <div className="app-shell">
           <TopBar
+            viewMode={viewMode}
+            onViewModeChange={changeViewMode}
             onHome={() => setScreen('start')}
             onNew={confirmNew}
             onImport={triggerOpenProject}
             onBackground={() => triggerBackground(false)}
             onExport={() => downloadJson(document)}
           />
-          <div className={`editor-grid${catalogOpen ? ' with-catalog' : ''}`}>
-            <ToolPalette />
-            {catalogOpen && <ObjectCatalog />}
-            <FloorPlanCanvas />
-            <PropertiesPanel />
-          </div>
-          <StatusBar />
+
+          {viewMode === '2d' ? (
+            <div className={`editor-grid${catalogOpen ? ' with-catalog' : ''}`}>
+              <ToolPalette />
+              {catalogOpen && <ObjectCatalog />}
+              <FloorPlanCanvas />
+              <PropertiesPanel />
+            </div>
+          ) : (
+            <div className="editor-grid view-3d">
+              <FloorPlan3D />
+              <PropertiesPanel />
+            </div>
+          )}
+
+          <StatusBar viewMode={viewMode} />
         </div>
       )}
     </>
