@@ -41,6 +41,9 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 // HELPER: Agrupa los muros en "recintos" según conectividad de sus vértices
 // (vive FUERA del componente, a nivel de módulo — no dentro del JSX)
 // ============================================
+/** Muros más cortos que esto (m) solo muestran su cota cuando están seleccionados. */
+const SHORT_WALL_LABEL_M = 0.6
+
 type WallCentroid = { cx: number; cy: number }
 type WallGroupResult = {
   groups: Wall[][]
@@ -68,7 +71,18 @@ function groupWallsByRoom(walls: Wall[], tolerance = 0.05): WallGroupResult {
     return Math.hypot(a.x - b.x, a.y - b.y) < tolerance
   }
 
+  /** ¿El punto cae sobre el muro (no solo en sus extremos)? Detecta uniones en "T". */
+  function touchesWall(p: Point, wall: Wall) {
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const lengthSq = dx * dx + dy * dy
+    if (lengthSq === 0) return false
+    const t = Math.max(0, Math.min(1, ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / lengthSq))
+    return Math.hypot(p.x - (wall.start.x + t * dx), p.y - (wall.start.y + t * dy)) < tolerance
+  }
+
   // Unimos muros que comparten un vértice (start-start, start-end, end-start, end-end)
+  // o que se tocan en "T" (el extremo de uno cae sobre el otro).
   for (let i = 0; i < walls.length; i++) {
     for (let j = i + 1; j < walls.length; j++) {
       const w1 = walls[i]
@@ -77,7 +91,11 @@ function groupWallsByRoom(walls: Wall[], tolerance = 0.05): WallGroupResult {
         samePoint(w1.start, w2.start) ||
         samePoint(w1.start, w2.end) ||
         samePoint(w1.end, w2.start) ||
-        samePoint(w1.end, w2.end)
+        samePoint(w1.end, w2.end) ||
+        touchesWall(w1.start, w2) ||
+        touchesWall(w1.end, w2) ||
+        touchesWall(w2.start, w1) ||
+        touchesWall(w2.end, w1)
       ) {
         union(i, j)
       }
@@ -682,8 +700,10 @@ export function FloorPlanCanvas() {
                   }}
                 />
 
-                {/* Cota/Etiqueta de medida alineada al lado */}
-                <g
+                {/* Cota/Etiqueta de medida alineada al lado. En muros muy cortos el
+                    texto es más largo que el propio muro y se monta con los vecinos:
+                    solo se muestra al seleccionarlos. */}
+                {(len >= SHORT_WALL_LABEL_M || selected) && <g
                   transform={`translate(${labelX}, ${labelY}) rotate(${angle})`}
                   pointerEvents="none"
                 >
@@ -698,7 +718,7 @@ export function FloorPlanCanvas() {
                   >
                     {len.toFixed(2)} m
                   </text>
-                </g>
+                </g>}
               </g>
             )
           })

@@ -5,10 +5,11 @@ type Props = {
   onNew: () => void
   onOpenProject: () => void
   onBackground: () => void
+  onDetect: () => void
   onResume: () => void
 }
 
-export function StartScreen({ hasDraft, onNew, onOpenProject, onBackground, onResume }: Props) {
+export function StartScreen({ hasDraft, onNew, onOpenProject, onBackground, onDetect, onResume }: Props) {
   const { t, i18n } = useTranslation()
 
   const changeLanguage = (language: 'es' | 'en') => {
@@ -65,6 +66,14 @@ export function StartScreen({ hasDraft, onNew, onOpenProject, onBackground, onRe
             <span>
               <strong>{t('start.background')}</strong>
               <small>{t('start.backgroundHint')}</small>
+            </span>
+          </button>
+
+          <button className="start-option" onClick={onDetect}>
+            <span className="option-icon">⌗</span>
+            <span>
+              <strong>{t('start.detect')}</strong>
+              <small>{t('start.detectHint')}</small>
             </span>
           </button>
 

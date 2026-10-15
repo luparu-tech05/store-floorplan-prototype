@@ -8,6 +8,7 @@ import { StartScreen } from './components/StartScreen'
 import { StatusBar } from './components/StatusBar'
 import { ToolPalette } from './components/ToolPalette'
 import { TopBar } from './components/TopBar'
+import { WallDetectionDialog } from './components/WallDetectionDialog'
 import { useFloorPlanStore } from './store/useFloorPlanStore'
 import type { BackgroundPlan, FloorPlanDocument, ViewMode } from './types/floorplan'
 import { downloadJson, fileToDataUrl, readJsonFile } from './utils/files'
@@ -20,6 +21,7 @@ export default function App() {
   const { t } = useTranslation()
   const [screen, setScreen] = useState<Screen>('start')
   const [viewMode, setViewMode] = useState<ViewMode>('2d')
+  const [detectOpen, setDetectOpen] = useState(false)
   const [hasDraft, setHasDraft] = useState(() => Boolean(localStorage.getItem(DRAFT_KEY)))
   const document = useFloorPlanStore((state) => state.document)
   const newDocument = useFloorPlanStore((state) => state.newDocument)
@@ -110,6 +112,15 @@ export default function App() {
     }
   }
 
+  const openDetectedPlan = (detected: FloorPlanDocument) => {
+    // Desde el editor, el plano detectado reemplaza al actual: se pide confirmación.
+    if (screen === 'editor' && !window.confirm(t('dialogs.newConfirm'))) return
+    loadDocument(detected)
+    setViewMode('2d')
+    setScreen('editor')
+    setDetectOpen(false)
+  }
+
   const changeViewMode = (mode: ViewMode) => {
     setViewMode(mode)
     if (mode === '3d') setCatalogOpen(false)
@@ -138,6 +149,7 @@ export default function App() {
           onNew={openNew}
           onOpenProject={triggerOpenProject}
           onBackground={() => triggerBackground(true)}
+          onDetect={() => setDetectOpen(true)}
           onResume={resumeDraft}
         />
       ) : (
@@ -149,6 +161,7 @@ export default function App() {
             onNew={confirmNew}
             onImport={triggerOpenProject}
             onBackground={() => triggerBackground(false)}
+            onDetect={() => setDetectOpen(true)}
             onExport={() => downloadJson(document)}
           />
 
@@ -168,6 +181,10 @@ export default function App() {
 
           <StatusBar viewMode={viewMode} />
         </div>
+      )}
+
+      {detectOpen && (
+        <WallDetectionDialog onClose={() => setDetectOpen(false)} onConfirm={openDetectedPlan} />
       )}
     </>
   )

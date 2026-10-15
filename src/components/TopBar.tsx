@@ -9,6 +9,7 @@ type Props = {
   onNew: () => void
   onImport: () => void
   onBackground: () => void
+  onDetect: () => void
   onExport: () => void
 }
 
@@ -19,6 +20,7 @@ export function TopBar({
   onNew,
   onImport,
   onBackground,
+  onDetect,
   onExport,
 }: Props) {
   const { t, i18n } = useTranslation()
@@ -45,6 +47,7 @@ export function TopBar({
         <button onClick={onNew}>{t('topbar.new')}</button>
         <button onClick={onImport}>{t('topbar.import')}</button>
         <button onClick={onBackground}>{t('topbar.background')}</button>
+        <button onClick={onDetect}>{t('topbar.detect')}</button>
         <button className="accent" onClick={onExport}>{t('topbar.export')}</button>
       </nav>
 
