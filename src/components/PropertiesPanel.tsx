@@ -22,6 +22,8 @@ export function PropertiesPanel() {
   const updatePlan = useFloorPlanStore((state) => state.updatePlan)
   const updateArea = useFloorPlanStore((state) => state.updateArea)
   const updateWall = useFloorPlanStore((state) => state.updateWall)
+  const setWallLength = useFloorPlanStore((state) => state.setWallLength)
+  const updateOpening = useFloorPlanStore((state) => state.updateOpening)
   const updateFixture = useFloorPlanStore((state) => state.updateFixture)
   const deleteSelection = useFloorPlanStore((state) => state.deleteSelection)
   const updateBackgroundOpacity = useFloorPlanStore((state) => state.updateBackgroundOpacity)
@@ -42,6 +44,10 @@ export function PropertiesPanel() {
 
   const selectedFixture = only?.type === 'fixture'
     ? document.fixtures.find((fixture) => fixture.id === only.id)
+    : undefined
+
+  const selectedOpening = only?.type === 'opening'
+    ? document.openings.find((opening) => opening.id === only.id)
     : undefined
 
   const countOf = (type: string) => selection.filter((item) => item.type === type).length
@@ -135,6 +141,9 @@ export function PropertiesPanel() {
               {countOf('wall') > 0 && <li>{t('status.walls', { count: countOf('wall') })}</li>}
               {countOf('fixture') > 0 && (
                 <li>{t('status.fixtures', { count: countOf('fixture') })}</li>
+              )}
+              {countOf('opening') > 0 && (
+                <li>{t('status.openings', { count: countOf('opening') })}</li>
               )}
             </ul>
             <button className="text-danger" onClick={deleteSelection}>
@@ -318,9 +327,81 @@ export function PropertiesPanel() {
           </>
         )}
 
+        {selectedOpening && (
+          <>
+            <div className="selection-badge">
+              {t(`openings.${selectedOpening.kind}`).toUpperCase()} · {selectedOpening.id.slice(0, 8)}
+            </div>
+            <div className="two-columns">
+              <label>
+                <span>{t('properties.openingWidth')}</span>
+                <input
+                  type="number"
+                  min="0.3"
+                  max="6"
+                  step="0.05"
+                  value={selectedOpening.widthM}
+                  onChange={(event) => {
+                    const value = Number(event.target.value)
+                    if (value > 0) updateOpening(selectedOpening.id, { widthM: value })
+                  }}
+                />
+              </label>
+              <label>
+                <span>{t('properties.openingOffset')}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  value={Number(selectedOpening.offsetM.toFixed(2))}
+                  onChange={(event) => {
+                    const value = Number(event.target.value)
+                    if (Number.isFinite(value)) updateOpening(selectedOpening.id, { offsetM: value })
+                  }}
+                />
+              </label>
+            </div>
+            {selectedOpening.kind === 'door' && (
+              <div className="opening-actions">
+                <button onClick={() => updateOpening(selectedOpening.id, { swing: selectedOpening.swing === 1 ? -1 : 1 })}>
+                  ⇅ {t('properties.flipSwing')}
+                </button>
+                <button
+                  onClick={() =>
+                    updateOpening(selectedOpening.id, { hinge: selectedOpening.hinge === 'start' ? 'end' : 'start' })
+                  }
+                >
+                  ⇄ {t('properties.flipHinge')}
+                </button>
+              </div>
+            )}
+            <p className="multi-hint">{t('properties.openingHint')}</p>
+          </>
+        )}
+
         {selectedWall && (
           <>
             <div className="selection-badge">WALL · {selectedWall.id.slice(0, 8)}</div>
+            <label>
+              <span>{t('properties.wallLength')}</span>
+              <input
+                type="number"
+                min="0.1"
+                max="200"
+                step="0.05"
+                value={Number(
+                  Math.hypot(
+                    selectedWall.end.x - selectedWall.start.x,
+                    selectedWall.end.y - selectedWall.start.y,
+                  ).toFixed(2),
+                )}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  if (value > 0) setWallLength(selectedWall.id, value)
+                }}
+              />
+              <small>{t('properties.wallLengthHint')}</small>
+            </label>
             <label>
               <span>{t('properties.thickness')}</span>
               <input

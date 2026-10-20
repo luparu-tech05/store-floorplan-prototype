@@ -268,6 +268,13 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .area-label { fill: #0f172a; font-size: .48px; font-weight: 800; letter-spacing: -.01em; }
 .area-sublabel { fill: #475569; font-size: .31px; font-weight: 700; text-transform: uppercase; }
 .fixture-shape { cursor: move; }
+.wall-handle { cursor: grab; }
+.opening-shape { cursor: move; }
+.catalog-section { margin: 16px 0 8px; color: #64748b; font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.opening-actions { display: grid; gap: 6px; margin-bottom: 8px; }
+.opening-actions button { padding: 8px 10px; color: #1d4ed8; text-align: left; border: 1px solid #d6dee8; border-radius: 8px; background: #f8fafc; font-size: 11px; font-weight: 700; }
+.opening-actions button:hover { border-color: #93c5fd; background: #eff6ff; }
+.wall-handle:active { cursor: grabbing; }
 .fixture-label { fill: #334155; font-size: .26px; font-weight: 700; }
 
 .canvas-meta {

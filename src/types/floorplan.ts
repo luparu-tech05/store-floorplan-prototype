@@ -78,6 +78,27 @@ export type Fixture = {
   attractiveness: number
 }
 
+export type OpeningKind = 'door' | 'window'
+
+/**
+ * Puerta o ventana ANCLADA a un muro: no tiene coordenadas propias, se
+ * calcula a partir del muro. Así, si el muro se alarga o se acorta, la
+ * abertura lo acompaña y nunca queda flotando fuera de él.
+ * Por ahora solo se dibuja en 2D.
+ */
+export type Opening = {
+  id: string
+  kind: OpeningKind
+  wallId: string
+  /** Distancia en metros desde el INICIO del muro hasta el CENTRO de la abertura. */
+  offsetM: number
+  widthM: number
+  /** Solo puertas: lado del muro hacia el que abre la hoja (1 o -1). */
+  swing: 1 | -1
+  /** Solo puertas: extremo de la abertura donde está la bisagra. */
+  hinge: 'start' | 'end'
+}
+
 export type BackgroundPlan = {
   id: string
   fileName: string
@@ -103,6 +124,8 @@ export type FloorPlanDocument = {
   walls: Wall[]
   areas: Area[]
   fixtures: Fixture[]
+  /** Puertas y ventanas. Los planos anteriores no lo traen: se completa con []. */
+  openings: Opening[]
   background?: BackgroundPlan
 }
 
@@ -111,6 +134,7 @@ export type SelectionRef =
   | { type: 'area'; id: string }
   | { type: 'wall'; id: string }
   | { type: 'fixture'; id: string }
+  | { type: 'opening'; id: string }
 
 /** La selección es múltiple: lista vacía = nada seleccionado. */
 export type Selection = SelectionRef[]

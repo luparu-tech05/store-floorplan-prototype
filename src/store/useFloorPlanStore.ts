@@ -7,6 +7,8 @@ import type {
   Fixture,
   FixtureKind,
   FloorPlanDocument,
+  Opening,
+  OpeningKind,
   Point,
   Selection,
   SelectionRef,
@@ -15,6 +17,7 @@ import type {
 } from '../types/floorplan'
 import { createFixture, fixtureBlueprints } from '../utils/fixtures'
 import { nextLabelIndex } from '../utils/labels'
+import { clampOffset, MIN_OPENING_WIDTH_M, openingBlueprints, reanchorOffset } from '../utils/openings'
 
 const HISTORY_LIMIT = 60
 
@@ -53,6 +56,10 @@ const normalizeDocument = (document: FloorPlanDocument): FloorPlanDocument => {
         fixture.lengthM ?? (fixture as unknown as { depthM?: number }).depthM ?? 0.5,
       heightM: fixture.heightM ?? fixtureBlueprints[fixture.kind]?.heightM ?? 1,
     })),
+    // Planos anteriores a puertas/ventanas no traen `openings`; las huérfanas se descartan.
+    openings: (clone.openings ?? []).filter((opening) =>
+      (clone.walls ?? []).some((wall) => wall.id === opening.wallId),
+    ),
   }
 }
 
@@ -71,8 +78,16 @@ export const createBlankDocument = (): FloorPlanDocument => {
     walls: [],
     areas: [],
     fixtures: [],
+    openings: [],
   }
 }
+
+/** Largo mínimo de un muro al editar sus extremos (m). */
+export const MIN_WALL_LENGTH_M = 0.1
+
+export type WallEnd = 'start' | 'end'
+
+type OpeningPatch = Partial<Pick<Opening, 'widthM' | 'offsetM' | 'swing' | 'hinge'>>
 
 type PlanPatch = Partial<Pick<FloorPlanDocument, 'name' | 'widthM' | 'heightM' | 'gridSizeM'>>
 type AreaPatch = Partial<Pick<Area, 'name' | 'category' | 'walkable' | 'attractiveness' | 'heatValue'>>
@@ -107,6 +122,10 @@ type FloorPlanState = {
    * esta es la única forma de saber qué dibujar como vista previa.
    */
   draggingFixtureKind: FixtureKind | null
+  /** Puerta/ventana del catálogo "armada" a la espera de un clic sobre un muro. */
+  pendingOpeningKind: OpeningKind | null
+  /** Puerta/ventana que se está arrastrando desde el catálogo. */
+  draggingOpeningKind: OpeningKind | null
   heatPreview: boolean
   zoom: number
   panX: number
@@ -118,6 +137,10 @@ type FloorPlanState = {
   addArea: (points: Point[]) => void
   updateArea: (id: string, patch: AreaPatch) => void
   updateWall: (id: string, patch: WallPatch) => void
+  /** Mueve UN extremo del muro (alargar, acortar o girar). Un solo registro en el historial. */
+  moveWallEndpoint: (id: string, end: WallEnd, point: Point) => void
+  /** Fija el largo exacto conservando el inicio y la dirección del muro. */
+  setWallLength: (id: string, lengthM: number) => void
   addFixture: (kind: FixtureKind, position: Point) => void
   moveFixture: (id: string, position: Point) => void
   /** Mueve varios objetos a la vez, con UN solo registro en el historial. */
@@ -125,6 +148,12 @@ type FloorPlanState = {
   updateFixture: (id: string, patch: FixturePatch) => void
   setPendingFixtureKind: (kind: FixtureKind | null) => void
   setDraggingFixtureKind: (kind: FixtureKind | null) => void
+  setPendingOpeningKind: (kind: OpeningKind | null) => void
+  setDraggingOpeningKind: (kind: OpeningKind | null) => void
+  addOpening: (kind: OpeningKind, wallId: string, offsetM: number) => void
+  /** Mover una abertura (también a otro muro). Un solo registro en el historial. */
+  moveOpening: (id: string, wallId: string, offsetM: number) => void
+  updateOpening: (id: string, patch: OpeningPatch) => void
   toggleCatalog: () => void
   setCatalogOpen: (open: boolean) => void
   setBackground: (background: BackgroundPlan) => void
@@ -141,6 +170,13 @@ type FloorPlanState = {
   resetViewport: () => void
   undo: () => void
   redo: () => void
+}
+
+/** Tras mover un extremo del muro, sus aberturas conservan su posición real. */
+const reanchorOpenings = (draft: FloorPlanDocument, before: Wall, after: Wall) => {
+  draft.openings.forEach((opening) => {
+    if (opening.wallId === after.id) opening.offsetM = reanchorOffset(opening, before, after)
+  })
 }
 
 const commit = (
@@ -169,6 +205,8 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
   tool: 'select',
   pendingFixtureKind: null,
   draggingFixtureKind: null,
+  pendingOpeningKind: null,
+  draggingOpeningKind: null,
   catalogOpen: false,
   heatPreview: false,
   zoom: 1,
@@ -184,6 +222,8 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       tool: 'select',
       pendingFixtureKind: null,
       draggingFixtureKind: null,
+      pendingOpeningKind: null,
+      draggingOpeningKind: null,
       heatPreview: false,
       zoom: 1,
       panX: 0,
@@ -199,6 +239,8 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       tool: 'select',
       pendingFixtureKind: null,
       draggingFixtureKind: null,
+      pendingOpeningKind: null,
+      draggingOpeningKind: null,
       zoom: 1,
       panX: 0,
       panY: 0,
@@ -250,6 +292,43 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       commit(state, (draft) => {
         const wall = draft.walls.find((candidate) => candidate.id === id)
         if (wall) Object.assign(wall, patch)
+      }),
+    ),
+
+  moveWallEndpoint: (id, end, point) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const wall = draft.walls.find((candidate) => candidate.id === id)
+        if (!wall) return
+        const other = end === 'start' ? wall.end : wall.start
+        if (Math.hypot(point.x - other.x, point.y - other.y) < MIN_WALL_LENGTH_M) return
+        // Solo se asigna si cambia: immer cuenta cualquier objeto nuevo como cambio
+        // y un clic sin mover dejaría un paso vacío en Deshacer.
+        const current = wall[end]
+        if (current.x === point.x && current.y === point.y) return
+        const before = { ...wall, start: { ...wall.start }, end: { ...wall.end } }
+        wall[end] = { x: point.x, y: point.y }
+        reanchorOpenings(draft, before, wall)
+      }),
+    ),
+
+  setWallLength: (id, lengthM) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const wall = draft.walls.find((candidate) => candidate.id === id)
+        if (!wall || !Number.isFinite(lengthM)) return
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const current = Math.hypot(dx, dy)
+        const target = Math.max(MIN_WALL_LENGTH_M, lengthM)
+        if (current === 0 || Math.abs(current - target) < 0.0005) return
+        const round = (value: number) => Math.round(value * 1000) / 1000
+        const before = { ...wall, start: { ...wall.start }, end: { ...wall.end } }
+        wall.end = {
+          x: round(wall.start.x + (dx / current) * target),
+          y: round(wall.start.y + (dy / current) * target),
+        }
+        reanchorOpenings(draft, before, wall)
       }),
     ),
 
@@ -307,10 +386,72 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
   setPendingFixtureKind: (pendingFixtureKind) =>
     set((state) => ({
       pendingFixtureKind,
+      pendingOpeningKind: pendingFixtureKind ? null : state.pendingOpeningKind,
       tool: pendingFixtureKind ? 'select' : state.tool,
     })),
 
   setDraggingFixtureKind: (draggingFixtureKind) => set({ draggingFixtureKind }),
+
+  setPendingOpeningKind: (pendingOpeningKind) =>
+    set((state) => ({
+      pendingOpeningKind,
+      pendingFixtureKind: pendingOpeningKind ? null : state.pendingFixtureKind,
+      tool: pendingOpeningKind ? 'select' : state.tool,
+    })),
+
+  setDraggingOpeningKind: (draggingOpeningKind) => set({ draggingOpeningKind }),
+
+  addOpening: (kind, wallId, offsetM) =>
+    set((state) => {
+      const opening: Opening = {
+        id: crypto.randomUUID(),
+        kind,
+        wallId,
+        offsetM,
+        widthM: openingBlueprints[kind].widthM,
+        swing: 1,
+        hinge: 'start',
+      }
+      const nextState = commit(state, (draft) => {
+        if (!draft.walls.some((wall) => wall.id === wallId)) return
+        draft.openings.push(opening)
+      })
+      return {
+        ...nextState,
+        selection: [{ type: 'opening', id: opening.id }],
+        tool: 'select',
+        pendingOpeningKind: null,
+        draggingOpeningKind: null,
+      }
+    }),
+
+  moveOpening: (id, wallId, offsetM) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const opening = draft.openings.find((candidate) => candidate.id === id)
+        if (!opening) return
+        if (opening.wallId === wallId && opening.offsetM === offsetM) return
+        opening.wallId = wallId
+        opening.offsetM = offsetM
+      }),
+    ),
+
+  updateOpening: (id, patch) =>
+    set((state) =>
+      commit(state, (draft) => {
+        const opening = draft.openings.find((candidate) => candidate.id === id)
+        const wall = opening && draft.walls.find((candidate) => candidate.id === opening.wallId)
+        if (!opening || !wall) return
+        const length = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y)
+        if (patch.widthM !== undefined) {
+          opening.widthM = Math.min(Math.max(MIN_OPENING_WIDTH_M, patch.widthM), length)
+        }
+        if (patch.offsetM !== undefined) opening.offsetM = patch.offsetM
+        if (patch.swing !== undefined) opening.swing = patch.swing
+        if (patch.hinge !== undefined) opening.hinge = patch.hinge
+        opening.offsetM = clampOffset(opening.offsetM, opening.widthM, length)
+      }),
+    ),
 
   /** Al cerrar el catálogo se desarma cualquier objeto pendiente de colocar:
    *  si no, quedaría un clic "cargado" sin nada visible que lo explique. */
@@ -318,12 +459,14 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
     set((state) => ({
       catalogOpen: !state.catalogOpen,
       pendingFixtureKind: state.catalogOpen ? null : state.pendingFixtureKind,
+      pendingOpeningKind: state.catalogOpen ? null : state.pendingOpeningKind,
     })),
 
   setCatalogOpen: (catalogOpen) =>
     set((state) => ({
       catalogOpen,
       pendingFixtureKind: catalogOpen ? state.pendingFixtureKind : null,
+      pendingOpeningKind: catalogOpen ? state.pendingOpeningKind : null,
     })),
 
   setBackground: (background) =>
@@ -373,6 +516,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       const areaIds = idsOf('area')
       const wallIds = idsOf('wall')
       const fixtureIds = idsOf('fixture')
+      const openingIds = idsOf('opening')
 
       // Todo lo seleccionado se borra en UNA sola operación: un Ctrl+Z lo devuelve.
       const next = commit(state, (draft) => {
@@ -380,6 +524,12 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
         if (wallIds.size) draft.walls = draft.walls.filter((wall) => !wallIds.has(wall.id))
         if (fixtureIds.size) {
           draft.fixtures = draft.fixtures.filter((fixture) => !fixtureIds.has(fixture.id))
+        }
+        // Las puertas y ventanas de un muro borrado se van con él.
+        if (openingIds.size || wallIds.size) {
+          draft.openings = draft.openings.filter(
+            (opening) => !openingIds.has(opening.id) && !wallIds.has(opening.wallId),
+          )
         }
       })
       return { ...next, selection: [] }
@@ -390,6 +540,7 @@ export const useFloorPlanStore = create<FloorPlanState>((set) => ({
       tool,
       selection: tool === 'select' ? state.selection : [],
       pendingFixtureKind: null,
+      pendingOpeningKind: null,
     })),
   setHeatPreview: (heatPreview) => set({ heatPreview }),
   setViewport: (viewport) => set(viewport),

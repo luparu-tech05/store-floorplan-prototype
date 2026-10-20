@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useFloorPlanStore } from '../store/useFloorPlanStore'
-import type { AreaCategory, FixtureKind, Point, SelectionRef, Wall } from '../types/floorplan'
+import { useFloorPlanStore, type WallEnd } from '../store/useFloorPlanStore'
+import type { AreaCategory, FixtureKind, Opening, OpeningKind, Point, SelectionRef, Wall } from '../types/floorplan'
 import {
   distance,
   heatColor,
@@ -21,6 +21,15 @@ import {
   isFixtureKind,
 } from '../utils/fixtures'
 import { areaDisplayName, fixtureDisplayName } from '../utils/labels'
+import { dragWallEndpoint } from '../utils/wallEditing'
+import {
+  isOpeningKind,
+  locateOnWall,
+  OPENING_DRAG_TYPE,
+  openingBlueprints,
+  openingGeometry,
+  type OpeningGeometry,
+} from '../utils/openings'
 import { useShortcuts } from '../shortcuts/useShortcuts'
 import { isSelectionPointer, resolvePointerGesture } from '../shortcuts/pointerGestures'
 
@@ -134,6 +143,83 @@ function groupWallsByRoom(walls: Wall[], tolerance = 0.05): WallGroupResult {
   return { groups, centroidByWallId }
 }
 
+/**
+ * Dibujo 2D de una puerta o ventana sobre su muro: primero "borra" el tramo del
+ * muro (hueco) y luego dibuja el símbolo de plano habitual.
+ *  - Ventana: dos líneas en las caras del muro y una central.
+ *  - Puerta: hoja perpendicular desde la bisagra y arco de apertura.
+ */
+function OpeningGlyph({
+  opening,
+  geometry: g,
+  selected,
+  ghost = false,
+}: {
+  opening: Pick<Opening, 'kind' | 'widthM' | 'swing' | 'hinge'>
+  geometry: OpeningGeometry
+  selected: boolean
+  ghost?: boolean
+}) {
+  const color = selected ? '#2563eb' : openingBlueprints[opening.kind].color
+  const half = g.thicknessM / 2
+  const shift = (p: Point, k: number) => ({ x: p.x + g.nx * k, y: p.y + g.ny * k })
+  const width = Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y)
+  const jamb = (p: Point) => {
+    const p1 = shift(p, -half)
+    const p2 = shift(p, half)
+    return <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#0f172a" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+  }
+
+  let symbol: React.ReactNode
+  if (opening.kind === 'window') {
+    symbol = [-half, 0, half].map((k) => {
+      const p1 = shift(g.a, k)
+      const p2 = shift(g.b, k)
+      return (
+        <line
+          key={k}
+          x1={p1.x}
+          y1={p1.y}
+          x2={p2.x}
+          y2={p2.y}
+          stroke={color}
+          strokeWidth={k === 0 ? 1 : 2}
+          vectorEffect="non-scaling-stroke"
+        />
+      )
+    })
+  } else {
+    const hinge = opening.hinge === 'start' ? g.a : g.b
+    const other = opening.hinge === 'start' ? g.b : g.a
+    const leaf = shift(hinge, opening.swing * width)
+    // Sentido del arco: de la hoja abierta hasta el otro lado del hueco.
+    const cross = (leaf.x - hinge.x) * (other.y - hinge.y) - (leaf.y - hinge.y) * (other.x - hinge.x)
+    symbol = (
+      <>
+        <path
+          d={`M ${leaf.x} ${leaf.y} A ${width} ${width} 0 0 ${cross > 0 ? 1 : 0} ${other.x} ${other.y}`}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.2}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
+        <line x1={hinge.x} y1={hinge.y} x2={leaf.x} y2={leaf.y} stroke={color} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+      </>
+    )
+  }
+
+  return (
+    <g opacity={ghost ? 0.6 : 1}>
+      {/* Hueco: tapa el muro con el color del lienzo */}
+      <line x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y} stroke="#f8fafc" strokeWidth={g.thicknessM + 0.04} strokeLinecap="butt" />
+      {jamb(g.a)}
+      {jamb(g.b)}
+      {symbol}
+    </g>
+  )
+}
+
 export function FloorPlanCanvas() {
   const { t } = useTranslation()
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -161,6 +247,12 @@ export function FloorPlanCanvas() {
   const undo = useFloorPlanStore((state) => state.undo)
   const redo = useFloorPlanStore((state) => state.redo)
   const deleteSelection = useFloorPlanStore((state) => state.deleteSelection)
+  const moveWallEndpoint = useFloorPlanStore((state) => state.moveWallEndpoint)
+  const pendingOpeningKind = useFloorPlanStore((state) => state.pendingOpeningKind)
+  const draggingOpeningKind = useFloorPlanStore((state) => state.draggingOpeningKind)
+  const setPendingOpeningKind = useFloorPlanStore((state) => state.setPendingOpeningKind)
+  const addOpening = useFloorPlanStore((state) => state.addOpening)
+  const moveOpening = useFloorPlanStore((state) => state.moveOpening)
 
   const [wallStart, setWallStart] = useState<Point | null>(null)
   const [areaPoints, setAreaPoints] = useState<Point[]>([])
@@ -179,6 +271,23 @@ export function FloorPlanCanvas() {
     offset: Point
     position: Point
   } | null>(null)
+  /**
+   * Arrastre de un extremo del muro seleccionado (alargar / acortar). Como con
+   * los objetos, vive en estado local y se guarda UNA vez al soltar.
+   */
+  const [endpointDrag, setEndpointDrag] = useState<{ wallId: string; end: WallEnd; point: Point } | null>(null)
+  /** Arrastre de una puerta/ventana ya colocada (a lo largo del muro o a otro muro). */
+  const [openingDrag, setOpeningDrag] = useState<{
+    id: string
+    wallId: string
+    offsetM: number
+    /** Punto de pantalla inicial: hasta moverse unos píxeles no se considera arrastre. */
+    startX: number
+    startY: number
+    moved: boolean
+  } | null>(null)
+  /** Vista previa al colocar una puerta/ventana desde el catálogo. */
+  const [openingPreview, setOpeningPreview] = useState<{ kind: OpeningKind; wallId: string; offsetM: number } | null>(null)
   /** Rectángulo de selección mientras se arrastra sobre zona vacía. */
   const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null)
   /** Barra espaciadora mantenida: convierte el arrastre en paneo, como en cualquier editor. */
@@ -190,6 +299,20 @@ export function FloorPlanCanvas() {
   const viewHeight = document.heightM / zoom
   const viewBox = `${panX} ${panY} ${viewWidth} ${viewHeight}`
 
+  // Mientras se arrastra un extremo, el muro se dibuja con la posición provisional.
+  const displayWalls = endpointDrag
+    ? document.walls.map((wall) =>
+        wall.id === endpointDrag.wallId ? { ...wall, [endpointDrag.end]: endpointDrag.point } : wall,
+      )
+    : document.walls
+  const editableWall =
+    tool === 'select' && selection.length === 1 && selection[0].type === 'wall'
+      ? displayWalls.find((wall) => wall.id === selection[0].id)
+      : undefined
+  const wallById = new Map(displayWalls.map((wall) => [wall.id, wall]))
+  /** Radio de las asas en metros: ~constante en pantalla sea cual sea el zoom. */
+  const handleRadius = viewWidth / 140
+
   useEffect(() => {
     setWallStart(null)
     setAreaPoints([])
@@ -198,6 +321,10 @@ export function FloorPlanCanvas() {
 
   useShortcuts({
     cancel: () => {
+      setEndpointDrag(null)
+      setOpeningDrag(null)
+      setOpeningPreview(null)
+      setPendingOpeningKind(null)
       setWallStart(null)
       setAreaPoints([])
       setMarquee(null)
@@ -217,6 +344,7 @@ export function FloorPlanCanvas() {
         ...document.areas.map((area) => ({ type: 'area', id: area.id }) as SelectionRef),
         ...document.walls.map((wall) => ({ type: 'wall', id: wall.id }) as SelectionRef),
         ...document.fixtures.map((fixture) => ({ type: 'fixture', id: fixture.id }) as SelectionRef),
+        ...document.openings.map((opening) => ({ type: 'opening', id: opening.id }) as SelectionRef),
       ])
     },
     undo,
@@ -250,6 +378,16 @@ export function FloorPlanCanvas() {
   }
 
   const handleDragOver = (event: React.DragEvent<SVGSVGElement>) => {
+    if (event.dataTransfer.types.includes(OPENING_DRAG_TYPE)) {
+      // Puertas/ventanas: solo se aceptan si hay un muro cerca del puntero.
+      event.preventDefault()
+      const raw = screenToWorld(event.clientX, event.clientY)
+      const kind = draggingOpeningKind
+      const spot = raw && kind ? locateOnWall(raw, document.walls, openingBlueprints[kind].widthM) : null
+      event.dataTransfer.dropEffect = spot ? 'copy' : 'none'
+      setOpeningPreview(spot && kind ? { kind, ...spot } : null)
+      return
+    }
     if (!event.dataTransfer.types.includes(FIXTURE_DRAG_TYPE)) return
     // Sin este preventDefault el navegador rechaza el drop y no se dispara onDrop.
     event.preventDefault()
@@ -267,11 +405,23 @@ export function FloorPlanCanvas() {
     const next = event.relatedTarget as Node | null
     if (next && event.currentTarget.contains(next)) return
     setDropPreview(null)
+    setOpeningPreview(null)
   }
 
   const handleDrop = (event: React.DragEvent<SVGSVGElement>) => {
     event.preventDefault()
     setDropPreview(null)
+
+    const rawOpening = event.dataTransfer.getData(OPENING_DRAG_TYPE)
+    if (rawOpening || draggingOpeningKind) {
+      setOpeningPreview(null)
+      const openingKind = isOpeningKind(rawOpening) ? rawOpening : draggingOpeningKind
+      const raw = screenToWorld(event.clientX, event.clientY)
+      if (!openingKind || !raw) return
+      const spot = locateOnWall(raw, document.walls, openingBlueprints[openingKind].widthM)
+      if (spot) addOpening(openingKind, spot.wallId, spot.offsetM)
+      return
+    }
 
     // En el drop sí se puede leer el dataTransfer; draggingFixtureKind es el plan B.
     const raw = event.dataTransfer.getData(FIXTURE_DRAG_TYPE)
@@ -329,13 +479,40 @@ export function FloorPlanCanvas() {
     svgRef.current?.setPointerCapture(event.pointerId)
   }
 
+  const startEndpointDrag = (event: React.PointerEvent<SVGCircleElement>, wall: Wall, end: WallEnd) => {
+    if (!isSelectionPointer({ tool, button: event.button, altKey: event.altKey, panKeyHeld })) return
+    event.stopPropagation()
+    setEndpointDrag({ wallId: wall.id, end, point: wall[end] })
+    svgRef.current?.setPointerCapture(event.pointerId)
+  }
+
+  const startOpeningDrag = (event: React.PointerEvent<SVGGElement>, opening: Opening) => {
+    if (!isSelectionPointer({ tool, button: event.button, altKey: event.altKey, panKeyHeld })) return
+    if (pendingFixtureKind || pendingOpeningKind) return
+    event.stopPropagation()
+    if (event.shiftKey) {
+      toggleSelection({ type: 'opening', id: opening.id })
+      return
+    }
+    setSelection([{ type: 'opening', id: opening.id }])
+    setOpeningDrag({
+      id: opening.id,
+      wallId: opening.wallId,
+      offsetM: opening.offsetM,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    })
+    svgRef.current?.setPointerCapture(event.pointerId)
+  }
+
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     const gesture = resolvePointerGesture({
       tool,
       button: event.button,
       altKey: event.altKey,
       panKeyHeld,
-      hasPendingFixture: Boolean(pendingFixtureKind),
+      hasPendingFixture: Boolean(pendingFixtureKind || pendingOpeningKind),
     })
 
     if (gesture === 'ignore') return
@@ -344,6 +521,16 @@ export function FloorPlanCanvas() {
       event.preventDefault()
       setPanning({ x: event.clientX, y: event.clientY })
       event.currentTarget.setPointerCapture(event.pointerId)
+      return
+    }
+
+    if (gesture === 'placeFixture' && pendingOpeningKind) {
+      const raw = screenToWorld(event.clientX, event.clientY)
+      const spot = raw && locateOnWall(raw, document.walls, openingBlueprints[pendingOpeningKind].widthM)
+      if (spot) {
+        addOpening(pendingOpeningKind, spot.wallId, spot.offsetM)
+        setOpeningPreview(null)
+      }
       return
     }
 
@@ -389,6 +576,35 @@ export function FloorPlanCanvas() {
   }
 
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (openingDrag) {
+      const moved =
+        openingDrag.moved || Math.hypot(event.clientX - openingDrag.startX, event.clientY - openingDrag.startY) > 3
+      if (!moved) return
+      const raw = screenToWorld(event.clientX, event.clientY)
+      const opening = document.openings.find((candidate) => candidate.id === openingDrag.id)
+      if (!raw || !opening) return
+      const spot = locateOnWall(raw, document.walls, opening.widthM)
+      // Lejos de cualquier muro se queda donde estaba.
+      setOpeningDrag({ ...openingDrag, moved: true, ...(spot ?? {}) })
+      return
+    }
+
+    if (pendingOpeningKind) {
+      const raw = screenToWorld(event.clientX, event.clientY)
+      const spot = raw && locateOnWall(raw, document.walls, openingBlueprints[pendingOpeningKind].widthM)
+      setOpeningPreview(spot ? { kind: pendingOpeningKind, ...spot } : null)
+      return
+    }
+
+    if (endpointDrag) {
+      const raw = screenToWorld(event.clientX, event.clientY)
+      const wall = document.walls.find((candidate) => candidate.id === endpointDrag.wallId)
+      if (!raw || !wall) return
+      const point = dragWallEndpoint(raw, wall, endpointDrag.end, document.walls, document.gridSizeM, event.shiftKey)
+      setEndpointDrag({ ...endpointDrag, point })
+      return
+    }
+
     if (fixtureDrag) {
       const raw = screenToWorld(event.clientX, event.clientY)
       if (!raw) return
@@ -440,6 +656,13 @@ export function FloorPlanCanvas() {
       ...document.fixtures
         .filter((fixture) => polygonIntersectsRect(fixtureCorners(fixture), rect))
         .map((fixture) => ({ type: 'fixture', id: fixture.id }) as SelectionRef),
+      ...document.openings
+        .filter((opening) => {
+          const wall = wallById.get(opening.wallId)
+          const g = wall && openingGeometry(opening, wall)
+          return g ? segmentIntersectsRect(g.a, g.b, rect) : false
+        })
+        .map((opening) => ({ type: 'opening', id: opening.id }) as SelectionRef),
     ]
 
     if (!additive) {
@@ -456,6 +679,24 @@ export function FloorPlanCanvas() {
   }
 
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (openingDrag) {
+      if (openingDrag.moved) moveOpening(openingDrag.id, openingDrag.wallId, openingDrag.offsetM)
+      setOpeningDrag(null)
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+      return
+    }
+
+    if (endpointDrag) {
+      moveWallEndpoint(endpointDrag.wallId, endpointDrag.end, endpointDrag.point)
+      setEndpointDrag(null)
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+      return
+    }
+
     if (fixtureDrag) {
       const delta = {
         x: fixtureDrag.position.x - fixtureDrag.origins[fixtureDrag.grabbed].x,
@@ -504,16 +745,23 @@ export function FloorPlanCanvas() {
     setViewport({ zoom: clamp(zoom * factor, 0.55, 7) })
   }
 
+  const selectedOpeningOnly = selection.length === 1 && selection[0].type === 'opening'
+
   const helpText = useMemo(() => {
+    if (pendingOpeningKind) {
+      return t('canvas.openingPlaceHelp', { name: t(`openings.${pendingOpeningKind}`).toLowerCase() })
+    }
     if (pendingFixtureKind) return t('canvas.placeHelp')
     if (tool === 'area') return t('canvas.areaHelp')
     if (tool === 'wall') return t('canvas.wallHelp')
     if (tool === 'select') {
       if (selection.length > 1) return t('canvas.multiHelp', { count: selection.length })
+      if (editableWall) return t('canvas.wallEditHelp')
+      if (selectedOpeningOnly) return t('canvas.openingHelp')
       return catalogOpen ? t('canvas.fixtureHelp') : t('canvas.selectHelp')
     }
     return t('canvas.escape')
-  }, [catalogOpen, pendingFixtureKind, selection.length, t, tool])
+  }, [catalogOpen, editableWall, pendingFixtureKind, pendingOpeningKind, selectedOpeningOnly, selection.length, t, tool])
 
   const draftAreaPoints = pointer && areaPoints.length
     ? [...areaPoints, pointer]
@@ -542,7 +790,10 @@ export function FloorPlanCanvas() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={() => !panning && !fixtureDrag && !marquee && setPointer(null)}
+        onPointerLeave={() => {
+          if (pendingOpeningKind) setOpeningPreview(null)
+          if (!panning && !fixtureDrag && !marquee && !endpointDrag && !openingDrag) setPointer(null)
+        }}
         onContextMenu={(event) => event.preventDefault()}
         onDragEnter={handleDragOver}
         onDragOver={handleDragOver}
@@ -640,9 +891,9 @@ export function FloorPlanCanvas() {
         {/* 1. MUROS GUARDADOS */}
         {(() => {
           // Centroide por cada recinto/grupo de muros conectados
-          const { centroidByWallId } = groupWallsByRoom(document.walls)
+          const { centroidByWallId } = groupWallsByRoom(displayWalls)
 
-          return document.walls.map((wall) => {
+          return displayWalls.map((wall) => {
             const selected = isSelected('wall', wall.id)
             const dx = wall.end.x - wall.start.x
             const dy = wall.end.y - wall.start.y
@@ -722,6 +973,48 @@ export function FloorPlanCanvas() {
               </g>
             )
           })
+        })()}
+
+        {/* 1a. PUERTAS Y VENTANAS, ancladas a su muro (solo 2D) */}
+        {document.openings.map((stored) => {
+          const opening =
+            openingDrag?.id === stored.id
+              ? { ...stored, wallId: openingDrag.wallId, offsetM: openingDrag.offsetM }
+              : stored
+          const wall = wallById.get(opening.wallId)
+          const geometry = wall && openingGeometry(opening, wall)
+          if (!geometry) return null
+          return (
+            <g
+              key={opening.id}
+              className="opening-shape"
+              onPointerDown={(event) => startOpeningDrag(event, stored)}
+            >
+              <OpeningGlyph opening={opening} geometry={geometry} selected={isSelected('opening', opening.id)} />
+              {/* Zona de clic más ancha que el dibujo, para poder agarrarla fácil */}
+              <line
+                x1={geometry.a.x}
+                y1={geometry.a.y}
+                x2={geometry.b.x}
+                y2={geometry.b.y}
+                stroke="transparent"
+                strokeWidth={geometry.thicknessM + 0.3}
+              />
+            </g>
+          )
+        })}
+
+        {openingPreview && (() => {
+          const wall = wallById.get(openingPreview.wallId)
+          const blueprint = openingBlueprints[openingPreview.kind]
+          const preview = { kind: openingPreview.kind, widthM: blueprint.widthM, swing: 1 as const, hinge: 'start' as const }
+          const geometry = wall && openingGeometry({ ...preview, offsetM: openingPreview.offsetM }, wall)
+          if (!geometry) return null
+          return (
+            <g pointerEvents="none">
+              <OpeningGlyph opening={preview} geometry={geometry} selected={false} ghost />
+            </g>
+          )
         })()}
 
         {/* 1b. OBJETOS COLOCADOS (estanterías, maniquíes, mostradores...) */}
@@ -829,6 +1122,26 @@ export function FloorPlanCanvas() {
             </g>
           )
         })()}
+
+        {/* 1d. ASAS DEL MURO SELECCIONADO: arrastrar un extremo lo alarga o acorta */}
+        {editableWall &&
+          (['start', 'end'] as const).map((end) => {
+            const active = endpointDrag?.end === end
+            return (
+              <circle
+                key={end}
+                className="wall-handle"
+                cx={editableWall[end].x}
+                cy={editableWall[end].y}
+                r={handleRadius}
+                fill={active ? '#2563eb' : '#ffffff'}
+                stroke="#2563eb"
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+                onPointerDown={(event) => startEndpointDrag(event, editableWall, end)}
+              />
+            )
+          })}
 
         {/* 2. BORRADOR MIENTRAS TRAZAS EL MURO */}
         {wallStart && pointer && (() => {

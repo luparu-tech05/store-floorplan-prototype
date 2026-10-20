@@ -319,6 +319,7 @@ function buildDocument(result: DetectionResult, loaded: Loaded): FloorPlanDocume
     })),
     areas: [],
     fixtures: [],
+    openings: [],
     background,
   }
 }
